@@ -219,7 +219,7 @@
             if (item) {
                 targetBadge.innerText = `${item.id} (${item.target}Hz)`;
                 targetBadge.className = "px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-xs font-bold";
-                txrxLabel.innerText = "";
+                txrxLabel.innerText = `[${item.tx} / ${item.rx}]`;
                 resetViewBtn.classList.remove("hidden");
             } else {
                 targetBadge.innerText = `전체 스펙트럼 관측 모드`;
@@ -414,7 +414,7 @@
 
                 if (bar) bar.style.width = `${levelPct}%`;
 
-                const SIGNAL_GREEN_THRESHOLD = 30; // 수신 인정 초록불 기준
+                const SIGNAL_GREEN_THRESHOLD = 30; 
                 const SIGNAL_AMBER_THRESHOLD = 15;
 
                 if (levelPct >= SIGNAL_GREEN_THRESHOLD) {
@@ -498,7 +498,7 @@
                     freqCtx.fillText(item.id, targetX - 5, 12);
                 });
             }
-            // RENDER MODE 2: Time-Domain Sine Wave
+            // RENDER MODE 2: Time-Domain Sine Wave (Oscilloscope Mode)
             else {
                 const timeData = new Uint8Array(analyser.fftSize);
                 analyser.getByteTimeDomainData(timeData);
@@ -507,15 +507,34 @@
                 statusText.innerText = selectedActive ? "정현파 수신 양호" : "신호 미약 / 접촉 불안정";
                 statusText.className = selectedActive ? "text-cyan-300 font-bold" : "text-rose-400 font-bold";
 
+                const targetHz = selectedChannel.target;
+                const sampleRate = audioCtx.sampleRate;
+                
+                // 1주기당 샘플 수 = 샘플링레이트 / 목표 주파수
+                const samplesPerPeriod = sampleRate / targetHz;
+                // 화면에 3주기 분량의 샘플만 표시하도록 슬라이스 범위 계산
+                const displaySamples = Math.floor(samplesPerPeriod * 3);
+
+                // 오실로스코프 트리거(Trigger) 찾기: 상승 에지(Zero-crossing upward) 탐색으로 파형 흔들림 방지
+                let startIndex = 0;
+                for (let i = 0; i < timeData.length - displaySamples; i++) {
+                    if (timeData[i] <= 128 && timeData[i + 1] > 128) {
+                        startIndex = i;
+                        break;
+                    }
+                }
+
                 freqCtx.lineWidth = 2.5;
                 freqCtx.strokeStyle = selectedActive ? '#00ffcc' : '#f43f5e';
                 freqCtx.beginPath();
 
-                const sliceWidth = width / timeData.length;
+                const limit = Math.min(displaySamples, timeData.length - startIndex);
+                const sliceWidth = width / limit;
                 let x = 0;
 
-                for (let i = 0; i < timeData.length; i++) {
-                    const v = ((timeData[i] - 128) * gainMultiplier + 128) / 128.0;
+                for (let i = 0; i < limit; i++) {
+                    const dataIndex = startIndex + i;
+                    const v = ((timeData[dataIndex] - 128) * gainMultiplier + 128) / 128.0;
                     const y = (v * height) / 2;
 
                     if (i === 0) freqCtx.moveTo(x, y);
@@ -524,7 +543,6 @@
                     x += sliceWidth;
                 }
 
-                freqCtx.lineTo(width, height / 2);
                 freqCtx.stroke();
             }
         }
