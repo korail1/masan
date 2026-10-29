@@ -535,34 +535,53 @@
                 statusText.innerText = selectedActive ? `${selectedChannel.id} (${selectedChannel.target}Hz) 정현파 수신` : "신호 미약 / 선택 대역 없음";
                 statusText.className = selectedActive ? "text-cyan-300 font-bold" : "text-rose-400 font-bold";
 
-                // Auto-scale Waveform Height
-                let maxDeviation = 0;
-                for (let i = 0; i < timeData.length; i++) {
-                    const dev = Math.abs(timeData[i] - 128);
-                    if (dev > maxDeviation) maxDeviation = dev;
+                if (selectedActive) {
+                    // Trigger Alignment: Find zero-crossing (rising edge) to stabilize the sine wave on screen
+                    let triggerOffset = 0;
+                    for (let i = 0; i < timeData.length - 1; i++) {
+                        if (timeData[i] <= 128 && timeData[i + 1] > 128) {
+                            triggerOffset = i;
+                            break;
+                        }
+                    }
+
+                    freqCtx.lineWidth = 3;
+                    freqCtx.strokeStyle = '#00ffcc';
+                    freqCtx.shadowColor = '#00ffcc';
+                    freqCtx.shadowBlur = 8;
+                    freqCtx.beginPath();
+
+                    // Display 4-6 full cycles of the selected target frequency regardless of audio sampling quirks
+                    const cyclesToShow = 5;
+                    const samplesPerCycle = audioCtx.sampleRate / selectedChannel.target;
+                    const totalSamplesNeeded = samplesPerCycle * cyclesToShow;
+                    const sliceWidth = width / totalSamplesNeeded;
+
+                    let x = 0;
+                    for (let i = 0; i < totalSamplesNeeded; i++) {
+                        const sampleIdx = Math.min(timeData.length - 1, triggerOffset + Math.floor(i));
+                        const rawVal = timeData[sampleIdx] - 128;
+                        
+                        // Clean normalized amplitude for clear visual rendering (Oscilloscope style)
+                        const normAmp = Math.sign(rawVal || 1) * Math.min(1, Math.abs(rawVal) / 12) * (height * 0.38);
+                        const y = (height / 2) - normAmp;
+
+                        if (i === 0) freqCtx.moveTo(x, y);
+                        else freqCtx.lineTo(x, y);
+
+                        x += sliceWidth;
+                    }
+                    freqCtx.stroke();
+                    freqCtx.shadowBlur = 0; // Reset canvas shadow effect
+                } else {
+                    // Low / No signal state: flat line
+                    freqCtx.lineWidth = 1.5;
+                    freqCtx.strokeStyle = '#f43f5e';
+                    freqCtx.beginPath();
+                    freqCtx.moveTo(0, height / 2);
+                    freqCtx.lineTo(width, height / 2);
+                    freqCtx.stroke();
                 }
-
-                let waveScale = (height * 0.42) / Math.max(8, maxDeviation);
-                if (maxDeviation < 3) waveScale = 1; // High noise suppression
-
-                freqCtx.lineWidth = 2.5;
-                freqCtx.strokeStyle = selectedActive ? '#00ffcc' : '#f43f5e';
-                freqCtx.beginPath();
-
-                const sliceWidth = width / timeData.length;
-                let x = 0;
-
-                for (let i = 0; i < timeData.length; i++) {
-                    const v = timeData[i] - 128;
-                    const y = (height / 2) - (v * waveScale);
-
-                    if (i === 0) freqCtx.moveTo(x, y);
-                    else freqCtx.lineTo(x, y);
-
-                    x += sliceWidth;
-                }
-
-                freqCtx.stroke();
             }
         }
 
