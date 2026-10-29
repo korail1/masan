@@ -380,7 +380,7 @@
                 if (bar) bar.style.width = `${levelPct}%`;
 
                 // 🌟 볼륨 수신 시 녹색 점등 (Glow 효과)
-                if (levelPct >= 35) { // 적정 신호 수준
+                if (levelPct >= 70) { // 적정 신호 수준
                     activeCount++;
                     if (selectedChannel && selectedChannel.id === item.id) selectedActive = true;
 
@@ -389,7 +389,7 @@
                     }
                     if (name) name.className = "font-bold text-xs text-emerald-300";
                     if (bar) bar.className = "h-full bg-emerald-400 transition-all duration-150";
-                } else if (levelPct >= 15) { // 미약 신호 (노란색)
+                } else if (levelPct >= 50) { // 미약 신호 (노란색)
                     if (card) {
                         card.className = `p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-amber-950/40 border-amber-500/60 ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
                     }
