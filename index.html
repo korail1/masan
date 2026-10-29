@@ -112,7 +112,7 @@
                     <span id="gainVal" class="text-xs font-mono text-cyan-400 font-bold w-10">1.5x</span>
                 </div>
                 <div class="flex items-center justify-between w-full sm:w-auto gap-4">
-                    <span class="text-[10px] text-slate-500"><i class="fa-solid fa-shield-halved mr-1"></i>EMA 필터 및 피크 홀드 적용</span>
+                    <span class="text-[10px] text-slate-500"><i class="fa-solid fa-shield-halved mr-1"></i>DAC 젠더 안정화 & EMA 적용</span>
                     <span id="measuredHzText" class="font-mono text-emerald-400 font-bold text-xs whitespace-nowrap">-- Hz</span>
                 </div>
             </div>
@@ -165,16 +165,14 @@
         let animationFrameId = null;
         let isMeasuring = false;
 
-        // Peak-Hold & EMA Memory
-        const channelPeakHold = {};
-        const channelPeakTimer = {};
-        const channelSmoothedLevel = {}; // EMA 필터링된 부드러운 값
-        let overallPeakHz = 0;
-        let overallPeakTimer = 0;
+        // C타입 / 8핀 DAC 젠더 초기 서지 마스킹용 변수
+        let isDacStabilized = false;
+        let dacStabilizeTimer = null;
+
+        // EMA 필터링용 메모리
+        const channelSmoothedLevel = {};
 
         FREQ_TABLE.forEach(item => {
-            channelPeakHold[item.id] = 0;
-            channelPeakTimer[item.id] = 0;
             channelSmoothedLevel[item.id] = 0;
         });
 
@@ -297,9 +295,21 @@
                 microphone.connect(analyser);
 
                 isMeasuring = true;
+                isDacStabilized = false; // ★ C타입/8핀 젠더 초기화 마스킹 플래그
+
                 btnText.innerText = "수신 중지";
                 btnIcon.className = "fa-solid fa-stop text-rose-400";
                 toggleBtn.className = "px-4 py-2 rounded-xl font-bold text-xs sm:text-sm bg-rose-600 hover:bg-rose-500 active:scale-95 text-white transition-all shadow-md flex items-center gap-2";
+
+                // ★ C타입/8핀 젠더 내장 오디오 칩셋 부팅 노이즈 무시 (1초 후 측정 개시)
+                statusDot.className = "w-2 h-2 rounded-full bg-amber-400 animate-ping";
+                statusText.innerText = "젠더 칩셋 초기화 중...";
+                statusText.className = "text-amber-300 font-bold";
+
+                clearTimeout(dacStabilizeTimer);
+                dacStabilizeTimer = setTimeout(() => {
+                    isDacStabilized = true;
+                }, 1000);
 
                 updateCanvasSize();
                 draw();
@@ -310,6 +320,8 @@
 
         function stopMeasurement() {
             isMeasuring = false;
+            isDacStabilized = false;
+            clearTimeout(dacStabilizeTimer);
 
             if (animationFrameId) {
                 cancelAnimationFrame(animationFrameId);
@@ -333,6 +345,7 @@
             measuredHzText.innerText = "-- Hz";
             statusDot.className = "w-2 h-2 rounded-full bg-slate-500";
             statusText.innerText = "대기 중";
+            statusText.className = "text-slate-400";
             if (totalEnergyBar) totalEnergyBar.style.width = "0%";
             if (totalEnergyText) totalEnergyText.innerText = "0%";
 
@@ -345,7 +358,6 @@
                     card.className = "p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-slate-900 border-slate-800 hover:border-slate-700";
                 }
                 if (name) name.className = "font-bold text-xs text-slate-300";
-                channelPeakHold[item.id] = 0;
                 channelSmoothedLevel[item.id] = 0;
             });
 
@@ -374,14 +386,20 @@
             const height = rect.height;
 
             const freqData = new Uint8Array(analyser.frequencyBinCount);
-            analyser.getByteFrequencyData(freqData);
+            
+            // ★ C타입/8핀 젠더 안정화 이전에는 오디오 버퍼를 0으로 마스킹
+            if (!isDacStabilized) {
+                freqData.fill(0);
+            } else {
+                analyser.getByteFrequencyData(freqData);
+            }
 
             const binResolution = (audioCtx.sampleRate / 2) / analyser.frequencyBinCount;
 
             freqCtx.fillStyle = '#020617';
             freqCtx.fillRect(0, 0, width, height);
 
-            // Draw Background Grid Lines
+            // Background Grid Lines
             freqCtx.strokeStyle = '#0f172a';
             freqCtx.lineWidth = 1;
             for (let x = 0; x < width; x += 30) {
@@ -401,9 +419,6 @@
             let selectedActive = false;
             let totalSpectrumEnergy = 0;
 
-            const now = Date.now();
-            const alpha = 0.25; // ★ EMA 필터 반응 속도 (낮을수록 부드럽고 묵직함, 0.2~0.3 권장)
-
             FREQ_TABLE.forEach(item => {
                 const minHz = item.target - TOLERANCE;
                 const maxHz = item.target + TOLERANCE;
@@ -416,24 +431,18 @@
                     totalSpectrumEnergy += freqData[b];
                 }
 
-                // 감도 증폭 및 노이즈 게이트 적용
+                // 감도 증폭 및 노이즈 게이트
                 let amplifiedVal = Math.min(255, channelMax * gainMultiplier);
                 let instantPct = Math.round((amplifiedVal / 255) * 100);
-                if (instantPct < 12) instantPct = 0; // 노이즈 게이트
+                if (instantPct < 10) instantPct = 0;
 
-                // ★ 지수 이동 평균(EMA) 필터 적용 (휐 현상 억제)
-                channelSmoothedLevel[item.id] = (alpha * instantPct) + ((1 - alpha) * channelSmoothedLevel[item.id]);
-                const currentSmoothedPct = Math.round(channelSmoothedLevel[item.id]);
-
-                // Peak-Hold & Decay Logic
-                if (currentSmoothedPct >= channelPeakHold[item.id]) {
-                    channelPeakHold[item.id] = currentSmoothedPct;
-                    channelPeakTimer[item.id] = now + 700; // 0.7초 홀드
-                } else if (now > channelPeakTimer[item.id]) {
-                    channelPeakHold[item.id] = Math.max(0, channelPeakHold[item.id] - 2);
-                }
-
-                const levelPct = channelPeakHold[item.id];
+                // ★ 비선형 EMA 필터 (상승 시 부드럽게 0.25, 하강 시 빠르게 0.45)
+                const targetVal = instantPct;
+                const currentVal = channelSmoothedLevel[item.id] || 0;
+                let alpha = targetVal > currentVal ? 0.25 : 0.45;
+                
+                channelSmoothedLevel[item.id] = (alpha * targetVal) + ((1 - alpha) * currentVal);
+                const levelPct = Math.round(channelSmoothedLevel[item.id]);
 
                 const card = document.getElementById(`card-${item.id}`);
                 const bar = document.getElementById(`bar-${item.id}`);
@@ -449,40 +458,40 @@
                     if (selectedChannel && selectedChannel.id === item.id) selectedActive = true;
 
                     if (card) {
-                        card.className = `p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-emerald-950/80 border-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.35)] ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
+                        card.className = `p-2 rounded-xl border text-left transition-all duration-100 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-emerald-950/80 border-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.35)] ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
                     }
                     if (name) name.className = "font-bold text-xs text-emerald-300";
-                    if (bar) bar.className = "h-full bg-emerald-400 transition-all duration-150";
+                    if (bar) bar.className = "h-full bg-emerald-400 transition-all duration-100";
                 } else if (levelPct >= SIGNAL_AMBER_THRESHOLD) {
                     if (card) {
-                        card.className = `p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-amber-950/40 border-amber-500/60 ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
+                        card.className = `p-2 rounded-xl border text-left transition-all duration-100 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-amber-950/40 border-amber-500/60 ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
                     }
                     if (name) name.className = "font-bold text-xs text-amber-300";
-                    if (bar) bar.className = "h-full bg-amber-400 transition-all duration-150";
+                    if (bar) bar.className = "h-full bg-amber-400 transition-all duration-100";
                 } else {
                     if (card) {
                         card.className = `p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-slate-900 border-slate-800 hover:border-slate-700 ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
                     }
                     if (name) name.className = "font-bold text-xs text-slate-300";
-                    if (bar) bar.className = "h-full bg-slate-700 transition-all duration-150";
+                    if (bar) bar.className = "h-full bg-slate-700 transition-all duration-100";
                 }
             });
 
-            // ★ 케이블 총괄 에너지 레벨 계산 및 바 표시 (전체 저항 증가 확인용)
+            // 케이블 총괄 에너지 바 (전체 레벨 저하 감지)
             let normalizedTotalEnergy = Math.min(100, Math.round((totalSpectrumEnergy / (FREQ_TABLE.length * 80)) * (gainMultiplier * 50)));
             if (totalEnergyBar && totalEnergyText) {
                 totalEnergyBar.style.width = `${normalizedTotalEnergy}%`;
                 totalEnergyText.innerText = `${normalizedTotalEnergy}%`;
                 if (normalizedTotalEnergy < 15) {
-                    totalEnergyBar.className = "h-full bg-rose-500 transition-all duration-150"; // 전체 레벨 저하 경고
+                    totalEnergyBar.className = "h-full bg-rose-500 transition-all duration-100";
                     totalEnergyText.className = "font-mono text-rose-400 font-bold text-[11px] w-10 text-right";
                 } else {
-                    totalEnergyBar.className = "h-full bg-cyan-400 transition-all duration-150";
+                    totalEnergyBar.className = "h-full bg-cyan-400 transition-all duration-100";
                     totalEnergyText.className = "font-mono text-cyan-400 font-bold text-[11px] w-10 text-right";
                 }
             }
 
-            // Update Peak Display Hz
+            // 실시간 피크 주파수
             let maxBin = 0, maxVal = 0;
             for (let i = 0; i < freqData.length; i++) {
                 if (freqData[i] > maxVal) {
@@ -492,22 +501,23 @@
             }
             const currentPeakHz = Math.round(maxBin * binResolution);
 
-            if (maxVal > 25) {
-                overallPeakHz = currentPeakHz;
-                overallPeakTimer = now + 1000;
-            }
-
-            if (now < overallPeakTimer && overallPeakHz > 0) {
-                measuredHzText.innerText = `피크 주파수: ${overallPeakHz} Hz`;
+            if (isDacStabilized) {
+                if (maxVal > 25) {
+                    measuredHzText.innerText = `피크 주파수: ${currentPeakHz} Hz`;
+                } else {
+                    measuredHzText.innerText = `신호 대기 중`;
+                }
             } else {
-                measuredHzText.innerText = `신호 감지 대기 중`;
+                measuredHzText.innerText = `안정화 대기 중...`;
             }
 
             // RENDER MODE 1: Spectrum Analyzer
             if (!selectedChannel) {
-                statusDot.className = activeCount > 0 ? "w-2 h-2 rounded-full bg-emerald-400 animate-pulse" : "w-2 h-2 rounded-full bg-slate-500";
-                statusText.innerText = activeCount > 0 ? `${activeCount}개 채널 수신 중` : "수신 대기";
-                statusText.className = activeCount > 0 ? "text-emerald-400 font-bold" : "text-slate-400";
+                if (isDacStabilized) {
+                    statusDot.className = activeCount > 0 ? "w-2 h-2 rounded-full bg-emerald-400 animate-pulse" : "w-2 h-2 rounded-full bg-slate-500";
+                    statusText.innerText = activeCount > 0 ? `${activeCount}개 채널 수신 중` : "수신 대기";
+                    statusText.className = activeCount > 0 ? "text-emerald-400 font-bold" : "text-slate-400";
+                }
 
                 const displayMaxHz = 7500;
                 const totalBins = Math.floor(displayMaxHz / binResolution);
@@ -539,14 +549,20 @@
                     freqCtx.fillText(item.id, targetX - 5, 12);
                 });
             }
-            // RENDER MODE 2: Time-Domain Sine Wave (개별 채널 선택 시)
+            // RENDER MODE 2: Time-Domain Sine Wave
             else {
                 const timeData = new Uint8Array(analyser.fftSize);
-                analyser.getByteTimeDomainData(timeData);
+                if (!isDacStabilized) {
+                    timeData.fill(128); // 정현파 평탄화
+                } else {
+                    analyser.getByteTimeDomainData(timeData);
+                }
 
-                statusDot.className = selectedActive ? "w-2 h-2 rounded-full bg-cyan-400 animate-ping" : "w-2 h-2 rounded-full bg-rose-500";
-                statusText.innerText = selectedActive ? "정현파 수신 양호" : "신호 미약 / 접촉 불안정";
-                statusText.className = selectedActive ? "text-cyan-300 font-bold" : "text-rose-400 font-bold";
+                if (isDacStabilized) {
+                    statusDot.className = selectedActive ? "w-2 h-2 rounded-full bg-cyan-400 animate-ping" : "w-2 h-2 rounded-full bg-rose-500";
+                    statusText.innerText = selectedActive ? "정현파 수신 양호" : "신호 미약 / 접촉 불안정";
+                    statusText.className = selectedActive ? "text-cyan-300 font-bold" : "text-rose-400 font-bold";
+                }
 
                 freqCtx.lineWidth = 2.5;
                 freqCtx.strokeStyle = selectedActive ? '#00ffcc' : '#f43f5e';
