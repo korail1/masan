@@ -94,11 +94,11 @@
                 <div class="flex items-center gap-3 w-full sm:w-auto">
                     <i class="fa-solid fa-sliders text-cyan-400"></i>
                     <span class="text-xs text-slate-300 font-bold whitespace-nowrap">수신 감도(증폭)</span>
-                    <input type="range" id="gainSlider" min="10" max="50" value="15" class="w-full sm:w-32 h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-400">
-                    <span id="gainVal" class="text-xs font-mono text-cyan-400 font-bold w-10">1.5x</span>
+                    <input type="range" id="gainSlider" min="10" max="60" value="25" class="w-full sm:w-32 h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-400">
+                    <span id="gainVal" class="text-xs font-mono text-cyan-400 font-bold w-10">2.5x</span>
                 </div>
                 <div class="flex items-center justify-between w-full sm:w-auto gap-4">
-                    <span class="text-[10px] text-slate-500"><i class="fa-solid fa-shield-halved mr-1"></i>피크 홀드(Peak-Hold) 적용 중</span>
+                    <span class="text-[10px] text-slate-500"><i class="fa-solid fa-filter text-cyan-400 mr-1"></i>채널선택 시 BPF 필터 자동적용</span>
                     <span id="measuredHzText" class="font-mono text-emerald-400 font-bold text-xs whitespace-nowrap">-- Hz</span>
                 </div>
             </div>
@@ -147,7 +147,9 @@
 
         let audioCtx = null;
         let analyser = null;
+        let bpfFilter = null; // Band-pass Filter Node
         let mediaStream = null;
+        let microphoneNode = null;
         let animationFrameId = null;
         let isMeasuring = false;
 
@@ -163,7 +165,7 @@
         });
 
         // Gain Multiplier
-        let gainMultiplier = 1.5;
+        let gainMultiplier = 2.5;
 
         // DOM elements
         const toggleBtn = document.getElementById("toggleBtn");
@@ -213,19 +215,31 @@
             });
         }
 
+        // Apply real-time Bandpass Filter & Update View State
         function selectChannel(item) {
             selectedChannel = item;
             
             if (item) {
-                targetBadge.innerText = `${item.id} (${item.target}Hz)`;
+                targetBadge.innerText = `${item.id} (${item.target}Hz) 대역 필터 모드`;
                 targetBadge.className = "px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-xs font-bold";
                 txrxLabel.innerText = "";
                 resetViewBtn.classList.remove("hidden");
+
+                // Update Band-pass filter center frequency
+                if (bpfFilter && audioCtx) {
+                    bpfFilter.frequency.setValueAtTime(item.target, audioCtx.currentTime);
+                    bpfFilter.Q.setValueAtTime(8.0, audioCtx.currentTime); // Sharp filtering for targeted frequency
+                }
             } else {
                 targetBadge.innerText = `전체 스펙트럼 관측 모드`;
                 targetBadge.className = "px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 text-xs font-bold";
                 txrxLabel.innerText = "";
                 resetViewBtn.classList.add("hidden");
+
+                if (bpfFilter && audioCtx) {
+                    bpfFilter.frequency.setValueAtTime(2500, audioCtx.currentTime);
+                    bpfFilter.Q.setValueAtTime(0.001, audioCtx.currentTime); // Pass-through all
+                }
             }
             
             FREQ_TABLE.forEach(i => {
@@ -275,8 +289,23 @@
                 analyser.fftSize = 4096;
                 analyser.smoothingTimeConstant = 0.2;
 
-                const microphone = audioCtx.createMediaStreamSource(mediaStream);
-                microphone.connect(analyser);
+                // Create Band-Pass Filter Node
+                bpfFilter = audioCtx.createBiquadFilter();
+                bpfFilter.type = "bandpass";
+                
+                if (selectedChannel) {
+                    bpfFilter.frequency.setValueAtTime(selectedChannel.target, audioCtx.currentTime);
+                    bpfFilter.Q.setValueAtTime(8.0, audioCtx.currentTime);
+                } else {
+                    bpfFilter.frequency.setValueAtTime(2500, audioCtx.currentTime);
+                    bpfFilter.Q.setValueAtTime(0.001, audioCtx.currentTime);
+                }
+
+                microphoneNode = audioCtx.createMediaStreamSource(mediaStream);
+                
+                // Pipeline: Mic -> BPF Filter -> Analyser
+                microphoneNode.connect(bpfFilter);
+                bpfFilter.connect(analyser);
 
                 isMeasuring = true;
                 btnText.innerText = "수신 중지";
@@ -360,7 +389,7 @@
             freqCtx.fillStyle = '#020617';
             freqCtx.fillRect(0, 0, width, height);
 
-            // Draw Background Grid Lines
+            // Background Grid Lines
             freqCtx.strokeStyle = '#0f172a';
             freqCtx.lineWidth = 1;
             for (let x = 0; x < width; x += 30) {
@@ -392,16 +421,15 @@
                     if (freqData[b] > channelMax) channelMax = freqData[b];
                 }
 
-                // Apply Sensitivity Boost Gain Multiplier
                 let amplifiedVal = Math.min(255, channelMax * gainMultiplier);
                 let instantPct = Math.round((amplifiedVal / 255) * 100);
 
-                if (instantPct < 10) instantPct = 0; // Noise Gate
+                if (instantPct < 10) instantPct = 0;
 
-                // Peak-Hold & Decay Logic
+                // Peak Hold & Decay
                 if (instantPct >= channelPeakHold[item.id]) {
                     channelPeakHold[item.id] = instantPct;
-                    channelPeakTimer[item.id] = now + 800; // 0.8s Hold
+                    channelPeakTimer[item.id] = now + 800;
                 } else if (now > channelPeakTimer[item.id]) {
                     channelPeakHold[item.id] = Math.max(0, channelPeakHold[item.id] - 3);
                 }
@@ -414,7 +442,7 @@
 
                 if (bar) bar.style.width = `${levelPct}%`;
 
-                const SIGNAL_GREEN_THRESHOLD = 30; // 수신 인정 초록불 기준
+                const SIGNAL_GREEN_THRESHOLD = 30;
                 const SIGNAL_AMBER_THRESHOLD = 15;
 
                 if (levelPct >= SIGNAL_GREEN_THRESHOLD) {
@@ -441,7 +469,7 @@
                 }
             });
 
-            // Update Peak Display Hz with Hold Timer
+            // Update Peak Display Hz
             let maxBin = 0, maxVal = 0;
             for (let i = 0; i < freqData.length; i++) {
                 if (freqData[i] > maxVal) {
@@ -498,14 +526,24 @@
                     freqCtx.fillText(item.id, targetX - 5, 12);
                 });
             }
-            // RENDER MODE 2: Time-Domain Sine Wave
+            // RENDER MODE 2: Sine Wave Oscilloscope Mode (Band-pass Filtered)
             else {
                 const timeData = new Uint8Array(analyser.fftSize);
                 analyser.getByteTimeDomainData(timeData);
 
                 statusDot.className = selectedActive ? "w-2 h-2 rounded-full bg-cyan-400 animate-ping" : "w-2 h-2 rounded-full bg-rose-500";
-                statusText.innerText = selectedActive ? "정현파 수신 양호" : "신호 미약 / 접촉 불안정";
+                statusText.innerText = selectedActive ? `${selectedChannel.id} (${selectedChannel.target}Hz) 정현파 수신` : "신호 미약 / 선택 대역 없음";
                 statusText.className = selectedActive ? "text-cyan-300 font-bold" : "text-rose-400 font-bold";
+
+                // Auto-scale Waveform Height
+                let maxDeviation = 0;
+                for (let i = 0; i < timeData.length; i++) {
+                    const dev = Math.abs(timeData[i] - 128);
+                    if (dev > maxDeviation) maxDeviation = dev;
+                }
+
+                let waveScale = (height * 0.42) / Math.max(8, maxDeviation);
+                if (maxDeviation < 3) waveScale = 1; // High noise suppression
 
                 freqCtx.lineWidth = 2.5;
                 freqCtx.strokeStyle = selectedActive ? '#00ffcc' : '#f43f5e';
@@ -515,8 +553,8 @@
                 let x = 0;
 
                 for (let i = 0; i < timeData.length; i++) {
-                    const v = ((timeData[i] - 128) * gainMultiplier + 128) / 128.0;
-                    const y = (v * height) / 2;
+                    const v = timeData[i] - 128;
+                    const y = (height / 2) - (v * waveScale);
 
                     if (i === 0) freqCtx.moveTo(x, y);
                     else freqCtx.lineTo(x, y);
@@ -524,7 +562,6 @@
                     x += sliceWidth;
                 }
 
-                freqCtx.lineTo(width, height / 2);
                 freqCtx.stroke();
             }
         }
