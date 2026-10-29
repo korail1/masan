@@ -94,11 +94,11 @@
                 <div class="flex items-center gap-3 w-full sm:w-auto">
                     <i class="fa-solid fa-sliders text-cyan-400"></i>
                     <span class="text-xs text-slate-300 font-bold whitespace-nowrap">수신 감도(증폭)</span>
-                    <input type="range" id="gainSlider" min="10" max="50" value="15" class="w-full sm:w-32 h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-400">
-                    <span id="gainVal" class="text-xs font-mono text-cyan-400 font-bold w-10">1.5x</span>
+                    <input type="range" id="gainSlider" min="10" max="200" value="50" class="w-full sm:w-32 h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-400">
+                    <span id="gainVal" class="text-xs font-mono text-cyan-400 font-bold w-12">5.0x</span>
                 </div>
                 <div class="flex items-center justify-between w-full sm:w-auto gap-4">
-                    <span class="text-[10px] text-slate-500"><i class="fa-solid fa-shield-halved mr-1"></i>대역 통과 필터(BPF) 연동 중</span>
+                    <span class="text-[10px] text-slate-500"><i class="fa-solid fa-shield-halved mr-1"></i>오토 게인 & BPF 연동</span>
                     <span id="measuredHzText" class="font-mono text-emerald-400 font-bold text-xs whitespace-nowrap">-- Hz</span>
                 </div>
             </div>
@@ -164,8 +164,8 @@
             channelPeakTimer[item.id] = 0;
         });
 
-        // Gain Multiplier
-        let gainMultiplier = 1.5;
+        // Gain Multiplier ( 기본값을 5.0x로 넉넉하게 상향 )
+        let gainMultiplier = 5.0;
 
         // DOM elements
         const toggleBtn = document.getElementById("toggleBtn");
@@ -183,6 +183,8 @@
 
         const gainSlider = document.getElementById("gainSlider");
         const gainVal = document.getElementById("gainVal");
+
+        gainSlider.value = 50; // 슬라이더 초기값 5.0x 반영
 
         gainSlider.addEventListener("input", (e) => {
             gainMultiplier = parseFloat(e.target.value) / 10;
@@ -205,7 +207,7 @@
                         <span id="name-${item.id}" class="font-bold text-xs text-slate-300">${item.id}</span>
                         <span class="text-[9px] font-mono text-slate-500">${item.target}Hz</span>
                     </div>
-                    <div class="text-[9px] text-slate-500 font-mono">${item.tx}/${item.rx}</div>
+                    <div class="text-[9px] font-mono text-slate-500">${item.tx}/${item.rx}</div>
                     
                     <div class="w-full bg-slate-950 h-1 rounded-full mt-1 overflow-hidden">
                         <div id="bar-${item.id}" class="h-full w-0 bg-slate-700 transition-all duration-150"></div>
@@ -224,10 +226,9 @@
                 txrxLabel.innerText = `[${item.tx} / ${item.rx}]`;
                 resetViewBtn.classList.remove("hidden");
 
-                // 밴드패스 필터 주파수 설정 (선택한 채널 주파수만 통과)
                 if (bandpassFilter) {
                     bandpassFilter.frequency.setValueAtTime(item.target, audioCtx.currentTime);
-                    bandpassFilter.Q.setValueAtTime(15, audioCtx.currentTime); // Q값이 높을수록 해당 주파수만 좁게 뾰족하게 추출
+                    bandpassFilter.Q.setValueAtTime(12, audioCtx.currentTime);
                 }
             } else {
                 targetBadge.innerText = `전체 스펙트럼 관측 모드`;
@@ -235,7 +236,6 @@
                 txrxLabel.innerText = "";
                 resetViewBtn.classList.add("hidden");
 
-                // 전체 모드일 때는 필터 효과 약화 또는 넓게 개방
                 if (bandpassFilter) {
                     bandpassFilter.frequency.setValueAtTime(3500, audioCtx.currentTime);
                     bandpassFilter.Q.setValueAtTime(0.5, audioCtx.currentTime);
@@ -291,15 +291,12 @@
                 analyser.fftSize = 4096;
                 analyser.smoothingTimeConstant = 0.1;
 
-                // 밴드패스 필터 노드 생성 (특정 주파수만 통과시키는 필터)
                 bandpassFilter = audioCtx.createBiquadFilter();
                 bandpassFilter.type = 'bandpass';
                 bandpassFilter.frequency.value = 3500;
                 bandpassFilter.Q.value = 1.0;
 
                 micSource = audioCtx.createMediaStreamSource(mediaStream);
-
-                // 오디오 라우팅: 마이크 -> 밴드패스 필터 -> 애널라이저
                 micSource.connect(bandpassFilter);
                 bandpassFilter.connect(analyser);
 
@@ -420,7 +417,7 @@
                 let amplifiedVal = Math.min(255, channelMax * gainMultiplier);
                 let instantPct = Math.round((amplifiedVal / 255) * 100);
 
-                if (instantPct < 10) instantPct = 0;
+                if (instantPct < 5) instantPct = 0;
 
                 if (instantPct >= channelPeakHold[item.id]) {
                     channelPeakHold[item.id] = instantPct;
@@ -437,8 +434,8 @@
 
                 if (bar) bar.style.width = `${levelPct}%`;
 
-                const SIGNAL_GREEN_THRESHOLD = 30; 
-                const SIGNAL_AMBER_THRESHOLD = 15;
+                const SIGNAL_GREEN_THRESHOLD = 25; 
+                const SIGNAL_AMBER_THRESHOLD = 10;
 
                 if (levelPct >= SIGNAL_GREEN_THRESHOLD) {
                     activeCount++;
@@ -474,7 +471,7 @@
             }
             const currentPeakHz = Math.round(maxBin * binResolution);
 
-            if (maxVal > 25) {
+            if (maxVal > 15) {
                 overallPeakHz = currentPeakHz;
                 overallPeakTimer = now + 1000;
             }
@@ -521,7 +518,7 @@
                     freqCtx.fillText(item.id, targetX - 5, 12);
                 });
             }
-            // RENDER MODE 2: Filtered Time-Domain Sine Wave (Oscilloscope Mode)
+            // RENDER MODE 2: Auto-Normalized Sine Wave (Oscilloscope Mode)
             else {
                 const timeData = new Uint8Array(analyser.fftSize);
                 analyser.getByteTimeDomainData(timeData);
@@ -549,23 +546,37 @@
 
                 if (startIndex === -1) startIndex = 0;
 
+                // [핵심] 현재 슬라이스된 파형의 최솟값/최댓값을 구하여 화면 높이에 맞게 자동 풀스크린(Auto-Normalize) 확대
+                let sliceMin = 255, sliceMax = 0;
+                const limit = Math.min(displaySamples, timeData.length - startIndex);
+                
+                for (let i = 0; i < limit; i++) {
+                    const val = timeData[startIndex + i];
+                    if (val < sliceMin) sliceMin = val;
+                    if (val > sliceMax) sliceMax = val;
+                }
+
+                let peakAmplitude = Math.max(sliceMax - 128, 128 - sliceMin);
+                // 노이즈 상태에서 과도하게 확대되는 것을 방지하기 위한 최소 보정
+                if (peakAmplitude < 2) peakAmplitude = 2; 
+
+                // 화면 높이의 80%를 꽉 채우도록 동적 스케일 계산
+                const dynamicScale = (height * 0.4) / peakAmplitude;
+
                 freqCtx.lineWidth = 2.5;
                 freqCtx.strokeStyle = selectedActive ? '#00ffcc' : '#f43f5e';
                 freqCtx.beginPath();
 
-                const limit = Math.min(displaySamples, timeData.length - startIndex);
                 const sliceWidth = width / limit;
                 let x = 0;
 
                 for (let i = 0; i < limit; i++) {
                     const dataIndex = startIndex + i;
-                    let sampleVal = timeData[dataIndex] - 128;
-                    sampleVal = sampleVal * gainMultiplier;
+                    const sampleVal = timeData[dataIndex] - 128; // 중앙(128) 기준 편차
                     
-                    let normalized = (sampleVal + 128) / 255.0;
-                    normalized = Math.max(0, Math.min(1, normalized));
-
-                    const y = height - (normalized * height);
+                    // 동적 스케일 및 사용자 슬라이더 게인 반영
+                    const scaledY = sampleVal * dynamicScale * (gainMultiplier / 5.0);
+                    const y = (height / 2) - scaledY; // 상하 반전 방지 및 중앙 정렬
 
                     if (i === 0) freqCtx.moveTo(x, y);
                     else freqCtx.lineTo(x, y);
