@@ -112,7 +112,7 @@
                     <span id="gainVal" class="text-xs font-mono text-cyan-400 font-bold w-10">1.5x</span>
                 </div>
                 <div class="flex items-center justify-between w-full sm:w-auto gap-4">
-                    <span class="text-[10px] text-slate-500"><i class="fa-solid fa-shield-halved mr-1"></i>DAC 젠더 안정화 & EMA 적용</span>
+                    <span class="text-[10px] text-slate-500"><i class="fa-solid fa-shield-halved mr-1"></i>DAC 젠더 안정화 & 고정밀 필터 적용</span>
                     <span id="measuredHzText" class="font-mono text-emerald-400 font-bold text-xs whitespace-nowrap">-- Hz</span>
                 </div>
             </div>
@@ -169,7 +169,7 @@
         let isDacStabilized = false;
         let dacStabilizeTimer = null;
 
-        // EMA 필터링용 메모리
+        // 고정밀 EMA 필터링용 메모리
         const channelSmoothedLevel = {};
 
         FREQ_TABLE.forEach(item => {
@@ -219,7 +219,7 @@
                         <span id="name-${item.id}" class="font-bold text-xs text-slate-300">${item.id}</span>
                         <span class="text-[9px] font-mono text-slate-500">${item.target}Hz</span>
                     </div>
-                    <div class="text-[9px] text-slate-500 font-mono">${item.tx}/${item.rx}</div>
+                    <div class="text-[9px] font-mono text-slate-500">${item.tx}/${item.rx}</div>
                     
                     <div class="w-full bg-slate-950 h-1 rounded-full mt-1 overflow-hidden">
                         <div id="bar-${item.id}" class="h-full w-0 bg-slate-700 transition-all duration-150"></div>
@@ -289,19 +289,19 @@
 
                 analyser = audioCtx.createAnalyser();
                 analyser.fftSize = 4096;
-                analyser.smoothingTimeConstant = 0.2;
+                // ★ C타입/8핀 젠더의 미세 떨림을 잡기 위해 분석기 평활화를 강력하게 적용 (0.85)
+                analyser.smoothingTimeConstant = 0.85;
 
                 const microphone = audioCtx.createMediaStreamSource(mediaStream);
                 microphone.connect(analyser);
 
                 isMeasuring = true;
-                isDacStabilized = false; // ★ C타입/8핀 젠더 초기화 마스킹 플래그
+                isDacStabilized = false;
 
                 btnText.innerText = "수신 중지";
                 btnIcon.className = "fa-solid fa-stop text-rose-400";
                 toggleBtn.className = "px-4 py-2 rounded-xl font-bold text-xs sm:text-sm bg-rose-600 hover:bg-rose-500 active:scale-95 text-white transition-all shadow-md flex items-center gap-2";
 
-                // ★ C타입/8핀 젠더 내장 오디오 칩셋 부팅 노이즈 무시 (1초 후 측정 개시)
                 statusDot.className = "w-2 h-2 rounded-full bg-amber-400 animate-ping";
                 statusText.innerText = "젠더 칩셋 초기화 중...";
                 statusText.className = "text-amber-300 font-bold";
@@ -387,7 +387,6 @@
 
             const freqData = new Uint8Array(analyser.frequencyBinCount);
             
-            // ★ C타입/8핀 젠더 안정화 이전에는 오디오 버퍼를 0으로 마스킹
             if (!isDacStabilized) {
                 freqData.fill(0);
             } else {
@@ -431,17 +430,23 @@
                     totalSpectrumEnergy += freqData[b];
                 }
 
-                // 감도 증폭 및 노이즈 게이트
                 let amplifiedVal = Math.min(255, channelMax * gainMultiplier);
                 let instantPct = Math.round((amplifiedVal / 255) * 100);
                 if (instantPct < 10) instantPct = 0;
 
-                // ★ 비선형 EMA 필터 (상승 시 부드럽게 0.25, 하강 시 빠르게 0.45)
+                // ★ 매우 묵직하고 고정된 느낌을 주기 위한 고정밀 EMA (alpha = 0.1)
                 const targetVal = instantPct;
                 const currentVal = channelSmoothedLevel[item.id] || 0;
-                let alpha = targetVal > currentVal ? 0.25 : 0.45;
+                const alpha = 0.1; 
                 
-                channelSmoothedLevel[item.id] = (alpha * targetVal) + ((1 - alpha) * currentVal);
+                let calculatedVal = (alpha * targetVal) + ((1 - alpha) * currentVal);
+
+                // ★ 미세 떨림 무시(Deadband): 변화 폭이 3% 미만이면 기존 값을 유지하여 고정된 것처럼 보이게 함
+                if (Math.abs(calculatedVal - currentVal) < 2.5) {
+                    calculatedVal = currentVal;
+                }
+
+                channelSmoothedLevel[item.id] = calculatedVal;
                 const levelPct = Math.round(channelSmoothedLevel[item.id]);
 
                 const card = document.getElementById(`card-${item.id}`);
@@ -458,35 +463,35 @@
                     if (selectedChannel && selectedChannel.id === item.id) selectedActive = true;
 
                     if (card) {
-                        card.className = `p-2 rounded-xl border text-left transition-all duration-100 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-emerald-950/80 border-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.35)] ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
+                        card.className = `p-2 rounded-xl border text-left transition-all duration-150 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-emerald-950/80 border-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.35)] ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
                     }
                     if (name) name.className = "font-bold text-xs text-emerald-300";
-                    if (bar) bar.className = "h-full bg-emerald-400 transition-all duration-100";
+                    if (bar) bar.className = "h-full bg-emerald-400 transition-all duration-150";
                 } else if (levelPct >= SIGNAL_AMBER_THRESHOLD) {
                     if (card) {
-                        card.className = `p-2 rounded-xl border text-left transition-all duration-100 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-amber-950/40 border-amber-500/60 ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
+                        card.className = `p-2 rounded-xl border text-left transition-all duration-150 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-amber-950/40 border-amber-500/60 ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
                     }
                     if (name) name.className = "font-bold text-xs text-amber-300";
-                    if (bar) bar.className = "h-full bg-amber-400 transition-all duration-100";
+                    if (bar) bar.className = "h-full bg-amber-400 transition-all duration-150";
                 } else {
                     if (card) {
                         card.className = `p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-slate-900 border-slate-800 hover:border-slate-700 ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
                     }
                     if (name) name.className = "font-bold text-xs text-slate-300";
-                    if (bar) bar.className = "h-full bg-slate-700 transition-all duration-100";
+                    if (bar) bar.className = "h-full bg-slate-700 transition-all duration-150";
                 }
             });
 
-            // 케이블 총괄 에너지 바 (전체 레벨 저하 감지)
+            // 케이블 총괄 에너지 바
             let normalizedTotalEnergy = Math.min(100, Math.round((totalSpectrumEnergy / (FREQ_TABLE.length * 80)) * (gainMultiplier * 50)));
             if (totalEnergyBar && totalEnergyText) {
                 totalEnergyBar.style.width = `${normalizedTotalEnergy}%`;
                 totalEnergyText.innerText = `${normalizedTotalEnergy}%`;
                 if (normalizedTotalEnergy < 15) {
-                    totalEnergyBar.className = "h-full bg-rose-500 transition-all duration-100";
+                    totalEnergyBar.className = "h-full bg-rose-500 transition-all duration-150";
                     totalEnergyText.className = "font-mono text-rose-400 font-bold text-[11px] w-10 text-right";
                 } else {
-                    totalEnergyBar.className = "h-full bg-cyan-400 transition-all duration-100";
+                    totalEnergyBar.className = "h-full bg-cyan-400 transition-all duration-150";
                     totalEnergyText.className = "font-mono text-cyan-400 font-bold text-[11px] w-10 text-right";
                 }
             }
@@ -553,7 +558,7 @@
             else {
                 const timeData = new Uint8Array(analyser.fftSize);
                 if (!isDacStabilized) {
-                    timeData.fill(128); // 정현파 평탄화
+                    timeData.fill(128);
                 } else {
                     analyser.getByteTimeDomainData(timeData);
                 }
