@@ -112,7 +112,7 @@
                     <span id="gainVal" class="text-xs font-mono text-cyan-400 font-bold w-10">1.5x</span>
                 </div>
                 <div class="flex items-center justify-between w-full sm:w-auto gap-4">
-                    <span class="text-[10px] text-slate-500"><i class="fa-solid fa-shield-halved mr-1"></i>DAC 젠더 안정화 & 고정밀 필터 적용</span>
+                    <span class="text-[10px] text-slate-500"><i class="fa-solid fa-shield-halved mr-1"></i>윈도우 슬라이딩 평균 적용</span>
                     <span id="measuredHzText" class="font-mono text-emerald-400 font-bold text-xs whitespace-nowrap">-- Hz</span>
                 </div>
             </div>
@@ -165,15 +165,13 @@
         let animationFrameId = null;
         let isMeasuring = false;
 
-        // C타입 / 8핀 DAC 젠더 초기 서지 마스킹용 변수
         let isDacStabilized = false;
         let dacStabilizeTimer = null;
 
-        // 고정밀 EMA 필터링용 메모리
-        const channelSmoothedLevel = {};
-
+        // ★ 슬라이딩 윈도우 평균용 기록 버퍼 (최근 15개 프레임 저장)
+        const historyBuffers = {};
         FREQ_TABLE.forEach(item => {
-            channelSmoothedLevel[item.id] = 0;
+            historyBuffers[item.id] = [];
         });
 
         // Gain Multiplier
@@ -289,7 +287,6 @@
 
                 analyser = audioCtx.createAnalyser();
                 analyser.fftSize = 4096;
-                // ★ C타입/8핀 젠더의 미세 떨림을 잡기 위해 분석기 평활화를 강력하게 적용 (0.85)
                 analyser.smoothingTimeConstant = 0.85;
 
                 const microphone = audioCtx.createMediaStreamSource(mediaStream);
@@ -358,7 +355,7 @@
                     card.className = "p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-slate-900 border-slate-800 hover:border-slate-700";
                 }
                 if (name) name.className = "font-bold text-xs text-slate-300";
-                channelSmoothedLevel[item.id] = 0;
+                historyBuffers[item.id] = [];
             });
 
             drawEmptyGrid();
@@ -432,22 +429,15 @@
 
                 let amplifiedVal = Math.min(255, channelMax * gainMultiplier);
                 let instantPct = Math.round((amplifiedVal / 255) * 100);
-                if (instantPct < 10) instantPct = 0;
+                if (instantPct < 12) instantPct = 0; // 노이즈 게이트
 
-                // ★ 매우 묵직하고 고정된 느낌을 주기 위한 고정밀 EMA (alpha = 0.1)
-                const targetVal = instantPct;
-                const currentVal = channelSmoothedLevel[item.id] || 0;
-                const alpha = 0.1; 
-                
-                let calculatedVal = (alpha * targetVal) + ((1 - alpha) * currentVal);
+                // ★ 슬라이딩 윈도우 평균 버퍼 관리 (최근 15프레임 평균)
+                const buf = historyBuffers[item.id];
+                buf.push(instantPct);
+                if (buf.length > 15) buf.shift(); // 15프레임 유지
 
-                // ★ 미세 떨림 무시(Deadband): 변화 폭이 3% 미만이면 기존 값을 유지하여 고정된 것처럼 보이게 함
-                if (Math.abs(calculatedVal - currentVal) < 2.5) {
-                    calculatedVal = currentVal;
-                }
-
-                channelSmoothedLevel[item.id] = calculatedVal;
-                const levelPct = Math.round(channelSmoothedLevel[item.id]);
+                const sum = buf.reduce((a, b) => a + b, 0);
+                const levelPct = Math.round(sum / buf.length);
 
                 const card = document.getElementById(`card-${item.id}`);
                 const bar = document.getElementById(`bar-${item.id}`);
