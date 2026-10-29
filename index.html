@@ -64,27 +64,26 @@
             <!-- Target Channel Display Header -->
             <div class="flex items-center justify-between px-1">
                 <div class="flex items-center gap-2">
-                    <span id="targetBadge" class="px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-xs font-bold">
-                        f1 (625Hz)
+                    <span id="targetBadge" class="px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 text-xs font-bold">
+                        전체 스펙트럼 관측 모드 (FFT)
                     </span>
-                    <span id="txrxLabel" class="text-xs font-mono text-slate-400">TX: T701 / RX: R701</span>
+                    <span id="txrxLabel" class="text-xs font-mono text-slate-400">f1 ~ f14 전 채널 감시 중</span>
                 </div>
-                <div class="flex items-center gap-2 text-xs">
-                    <span class="text-slate-400">실시간 피크:</span>
-                    <span id="peakAmpText" class="font-mono text-cyan-400 font-bold">0 %</span>
-                </div>
+                <button id="resetViewBtn" onclick="selectChannel(null)" class="hidden text-[11px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-cyan-500/30 transition-all font-semibold">
+                    <i class="fa-solid fa-chart-simple mr-1"></i>전체 스펙트럼 보기
+                </button>
             </div>
 
-            <!-- Waveform Canvas Box -->
+            <!-- Waveform / Spectrum Canvas Box -->
             <div class="relative w-full h-56 sm:h-64 bg-slate-950 rounded-xl border border-slate-800 overflow-hidden">
                 <canvas id="freqCanvas"></canvas>
                 
                 <!-- Grid Center Guide Lines Overlay -->
                 <div class="absolute inset-0 pointer-events-none flex items-center justify-center">
-                    <div class="w-full border-b border-cyan-500/20 border-dashed"></div>
+                    <div class="w-full border-b border-cyan-500/10 border-dashed"></div>
                 </div>
 
-                <!-- Signal Status Overlay Overlay -->
+                <!-- Signal Status Overlay -->
                 <div id="statusOverlay" class="absolute top-3 right-3 px-3 py-1.5 rounded-lg bg-slate-900/80 border border-slate-700 text-xs font-bold text-slate-400 flex items-center gap-2 backdrop-blur-sm">
                     <span id="statusDot" class="w-2 h-2 rounded-full bg-slate-500"></span>
                     <span id="statusText">대기 중</span>
@@ -92,7 +91,7 @@
             </div>
 
             <div class="flex justify-between items-center text-[11px] text-slate-400 px-1">
-                <span><i class="fa-solid fa-circle-info mr-1 text-cyan-400"></i>정현파 파형이 매끄럽지 않거나 찌그러지면 보안기/케이블 불량입니다.</span>
+                <span id="modeHelpText"><i class="fa-solid fa-circle-info mr-1 text-cyan-400"></i>채널 상자를 누르면 개별 정현파 파형(보안기/케이블 깨짐)을 검사합니다.</span>
                 <span id="measuredHzText" class="font-mono text-emerald-400 font-bold">-- Hz</span>
             </div>
         </div>
@@ -100,8 +99,8 @@
         <!-- 14 Channel Grid (5 Cols 3 Rows) -->
         <div class="bg-cardBg border border-slate-700/60 rounded-2xl p-3 sm:p-4 shadow-xl">
             <div class="flex justify-between items-center mb-2 px-1">
-                <h2 class="text-xs font-bold text-slate-300">채널 선택 및 14CH 수신 감지 상태</h2>
-                <span class="text-[10px] text-slate-400">버튼 터치 시 해당 정현파 파형 관측</span>
+                <h2 class="text-xs font-bold text-slate-300">채널 선택 및 14CH 감지 점등</h2>
+                <span class="text-[10px] text-slate-400">적정 수신 시 초록색 점등</span>
             </div>
             
             <div class="grid grid-cols-5 gap-1.5 sm:gap-2" id="freqGrid">
@@ -136,17 +135,13 @@
         ];
 
         const TOLERANCE = 25; // Target Hz tolerance
-        let selectedChannel = FREQ_TABLE[0]; // Active view channel
+        let selectedChannel = null; // null = Spectrum FFT Mode, Object = Waveform Sine Mode
 
         let audioCtx = null;
         let analyser = null;
         let mediaStream = null;
         let animationFrameId = null;
         let isMeasuring = false;
-
-        // History tracking for detection stabilization
-        const historyMap = {};
-        FREQ_TABLE.forEach(item => historyMap[item.id] = []);
 
         // DOM elements
         const toggleBtn = document.getElementById("toggleBtn");
@@ -157,7 +152,8 @@
 
         const targetBadge = document.getElementById("targetBadge");
         const txrxLabel = document.getElementById("txrxLabel");
-        const peakAmpText = document.getElementById("peakAmpText");
+        const resetViewBtn = document.getElementById("resetViewBtn");
+        const modeHelpText = document.getElementById("modeHelpText");
         const measuredHzText = document.getElementById("measuredHzText");
         const statusDot = document.getElementById("statusDot");
         const statusText = document.getElementById("statusText");
@@ -167,53 +163,61 @@
             const gridEl = document.getElementById("freqGrid");
             gridEl.innerHTML = "";
 
-            FREQ_TABLE.forEach((item, index) => {
+            FREQ_TABLE.forEach((item) => {
                 const btn = document.createElement("button");
                 btn.id = `card-${item.id}`;
-                btn.className = `p-2 rounded-xl border text-left transition-all flex flex-col justify-between min-h-[64px] relative overflow-hidden ${
-                    selectedChannel.id === item.id 
-                    ? 'bg-slate-800 border-cyan-400 ring-2 ring-cyan-400/30' 
-                    : 'bg-slate-900 border-slate-800 hover:border-slate-700'
-                }`;
+                btn.className = `p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-slate-900 border-slate-800 hover:border-slate-700`;
 
                 btn.onclick = () => selectChannel(item);
 
                 btn.innerHTML = `
                     <div class="flex items-center justify-between w-full">
-                        <span class="font-bold text-xs ${selectedChannel.id === item.id ? 'text-cyan-300' : 'text-slate-200'}">${item.id}</span>
+                        <span id="name-${item.id}" class="font-bold text-xs text-slate-300">${item.id}</span>
                         <span class="text-[9px] font-mono text-slate-500">${item.target}Hz</span>
                     </div>
                     <div class="text-[9px] text-slate-500 font-mono">${item.tx}/${item.rx}</div>
                     
                     <!-- Signal Level Meter Bar -->
-                    <div class="w-full bg-slate-800 h-1 rounded-full mt-1 overflow-hidden">
-                        <div id="bar-${item.id}" class="h-full w-0 bg-slate-600 transition-all duration-150"></div>
+                    <div class="w-full bg-slate-950 h-1 rounded-full mt-1 overflow-hidden">
+                        <div id="bar-${item.id}" class="h-full w-0 bg-slate-700 transition-all duration-150"></div>
                     </div>
                 `;
                 gridEl.appendChild(btn);
             });
         }
 
-        // Select specific channel to view sine wave
+        // Select channel for Sine Wave mode OR null for Spectrum FFT mode
         function selectChannel(item) {
             selectedChannel = item;
-            targetBadge.innerText = `${item.id} (${item.target}Hz)`;
-            txrxLabel.innerText = `TX: ${item.tx} / RX: ${item.rx}`;
             
-            // Re-render channel grid borders
+            if (item) {
+                targetBadge.innerText = `${item.id} (${item.target}Hz) 파형 관측`;
+                targetBadge.className = "px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-xs font-bold";
+                txrxLabel.innerText = `TX: ${item.tx} / RX: ${item.rx}`;
+                resetViewBtn.classList.remove("hidden");
+                modeHelpText.innerHTML = `<i class="fa-solid fa-circle-info mr-1 text-cyan-400"></i>정현파 파형이 일정한지, 찌그러짐(클리핑)이 없는지 확인하세요.`;
+            } else {
+                targetBadge.innerText = `전체 스펙트럼 관측 모드 (FFT)`;
+                targetBadge.className = "px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 text-xs font-bold";
+                txrxLabel.innerText = `f1 ~ f14 전 채널 감시 중`;
+                resetViewBtn.classList.add("hidden");
+                modeHelpText.innerHTML = `<i class="fa-solid fa-circle-info mr-1 text-cyan-400"></i>채널 상자를 누르면 개별 정현파 파형(보안기/케이블 깨짐)을 검사합니다.`;
+            }
+            
+            // Re-render UI borders for selected channel
             FREQ_TABLE.forEach(i => {
                 const card = document.getElementById(`card-${i.id}`);
                 if (card) {
-                    if (i.id === item.id) {
-                        card.className = "p-2 rounded-xl border text-left transition-all flex flex-col justify-between min-h-[64px] relative bg-slate-800 border-cyan-400 ring-2 ring-cyan-400/30";
+                    if (selectedChannel && i.id === selectedChannel.id) {
+                        card.classList.add("ring-2", "ring-cyan-400");
                     } else {
-                        card.className = "p-2 rounded-xl border text-left transition-all flex flex-col justify-between min-h-[64px] relative bg-slate-900 border-slate-800 hover:border-slate-700";
+                        card.classList.remove("ring-2", "ring-cyan-400");
                     }
                 }
             });
         }
 
-        // Adjust Canvas Retina DPI Scale for iOS / Android
+        // Adjust Canvas Retina DPI Scale
         function updateCanvasSize() {
             const dpr = window.devicePixelRatio || 1;
             const rect = freqCanvas.getBoundingClientRect();
@@ -248,7 +252,7 @@
                 }
 
                 analyser = audioCtx.createAnalyser();
-                analyser.fftSize = 2048; // Optimal size for time-domain sine wave rendering
+                analyser.fftSize = 2048;
 
                 const microphone = audioCtx.createMediaStreamSource(mediaStream);
                 microphone.connect(analyser);
@@ -289,17 +293,21 @@
             toggleBtn.className = "px-4 py-2 rounded-xl font-bold text-xs sm:text-sm bg-blue-600 hover:bg-blue-500 active:scale-95 text-white transition-all shadow-md flex items-center gap-2";
 
             // Reset UI States
-            peakAmpText.innerText = "0 %";
             measuredHzText.innerText = "-- Hz";
             statusDot.className = "w-2 h-2 rounded-full bg-slate-500";
             statusText.innerText = "대기 중";
 
             FREQ_TABLE.forEach(item => {
                 const bar = document.getElementById(`bar-${item.id}`);
+                const card = document.getElementById(`card-${item.id}`);
+                const name = document.getElementById(`name-${item.id}`);
                 if (bar) bar.style.width = "0%";
+                if (card) {
+                    card.className = "p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-slate-900 border-slate-800 hover:border-slate-700";
+                }
+                if (name) name.className = "font-bold text-xs text-slate-300";
             });
 
-            // Draw Blank Canvas Grid
             drawEmptyGrid();
         }
 
@@ -309,7 +317,6 @@
             freqCtx.strokeStyle = '#1e293b';
             freqCtx.lineWidth = 1;
 
-            // Draw Horizontal Center Line
             freqCtx.beginPath();
             freqCtx.moveTo(0, rect.height / 2);
             freqCtx.lineTo(rect.width, rect.height / 2);
@@ -326,19 +333,16 @@
             const width = rect.width;
             const height = rect.height;
 
-            // 1. Time-Domain Data (Sine Waveform)
-            const timeData = new Uint8Array(analyser.fftSize);
-            analyser.getByteTimeDomainData(timeData);
-
-            // 2. Frequency Domain Data (Spectrum Peak Hz)
             const freqData = new Uint8Array(analyser.frequencyBinCount);
             analyser.getByteFrequencyData(freqData);
+
+            const binResolution = (audioCtx.sampleRate / 2) / analyser.frequencyBinCount;
 
             // Clear Canvas
             freqCtx.fillStyle = '#020617';
             freqCtx.fillRect(0, 0, width, height);
 
-            // Draw Background Grid
+            // Draw Background Grid Lines
             freqCtx.strokeStyle = '#0f172a';
             freqCtx.lineWidth = 1;
             for (let x = 0; x < width; x += 30) {
@@ -354,97 +358,131 @@
                 freqCtx.stroke();
             }
 
-            // Calculate Peak Amplitude & Max Frequency
-            let maxVal = 0;
-            let peakBin = 0;
-            const binResolution = (audioCtx.sampleRate / 2) / analyser.frequencyBinCount;
-
-            for (let i = 0; i < freqData.length; i++) {
-                if (freqData[i] > maxVal) {
-                    maxVal = freqData[i];
-                    peakBin = i;
-                }
-            }
-
-            const measuredHz = Math.round(peakBin * binResolution);
-            const peakPercent = Math.round((maxVal / 255) * 100);
-            peakAmpText.innerText = `${peakPercent} %`;
-
-            if (maxVal > 30) {
-                measuredHzText.innerText = `수신: ${measuredHz} Hz`;
-            } else {
-                measuredHzText.innerText = `수신: -- Hz`;
-            }
-
-            // Update Channel Level Bars & Status
-            let activeSelectedFound = false;
+            // Calculate active level for all 14 channels
+            let activeCount = 0;
+            let selectedActive = false;
 
             FREQ_TABLE.forEach(item => {
                 const minHz = item.target - TOLERANCE;
                 const maxHz = item.target + TOLERANCE;
-                const targetBinStart = Math.floor(minHz / binResolution);
-                const targetBinEnd = Math.ceil(maxHz / binResolution);
+                const startBin = Math.floor(minHz / binResolution);
+                const endBin = Math.ceil(maxHz / binResolution);
 
                 let channelMax = 0;
-                for (let b = targetBinStart; b <= targetBinEnd; b++) {
+                for (let b = startBin; b <= endBin; b++) {
                     if (freqData[b] > channelMax) channelMax = freqData[b];
                 }
 
                 const levelPct = Math.round((channelMax / 255) * 100);
+                const card = document.getElementById(`card-${item.id}`);
                 const bar = document.getElementById(`bar-${item.id}`);
-                if (bar) {
-                    bar.style.width = `${levelPct}%`;
-                    if (levelPct > 40) {
-                        bar.className = "h-full bg-emerald-400 transition-all duration-150";
-                    } else if (levelPct > 15) {
-                        bar.className = "h-full bg-amber-400 transition-all duration-150";
-                    } else {
-                        bar.className = "h-full bg-slate-600 transition-all duration-150";
-                    }
-                }
+                const name = document.getElementById(`name-${item.id}`);
 
-                if (item.id === selectedChannel.id && levelPct > 30) {
-                    activeSelectedFound = true;
+                if (bar) bar.style.width = `${levelPct}%`;
+
+                // 🌟 볼륨 수신 시 녹색 점등 (Glow 효과)
+                if (levelPct >= 35) { // 적정 신호 수준
+                    activeCount++;
+                    if (selectedChannel && selectedChannel.id === item.id) selectedActive = true;
+
+                    if (card) {
+                        card.className = `p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-emerald-950/80 border-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.35)] ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
+                    }
+                    if (name) name.className = "font-bold text-xs text-emerald-300";
+                    if (bar) bar.className = "h-full bg-emerald-400 transition-all duration-150";
+                } else if (levelPct >= 15) { // 미약 신호 (노란색)
+                    if (card) {
+                        card.className = `p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-amber-950/40 border-amber-500/60 ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
+                    }
+                    if (name) name.className = "font-bold text-xs text-amber-300";
+                    if (bar) bar.className = "h-full bg-amber-400 transition-all duration-150";
+                } else { // 신호 없음
+                    if (card) {
+                        card.className = `p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-slate-900 border-slate-800 hover:border-slate-700 ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
+                    }
+                    if (name) name.className = "font-bold text-xs text-slate-300";
+                    if (bar) bar.className = "h-full bg-slate-700 transition-all duration-150";
                 }
             });
 
-            // Update Status Badge Overlay
-            if (activeSelectedFound) {
-                statusDot.className = "w-2 h-2 rounded-full bg-emerald-400 animate-ping";
-                statusText.innerText = "신호 양호 (정현파 정상)";
-                statusText.className = "text-emerald-400 font-bold";
-            } else if (maxVal > 20) {
-                statusDot.className = "w-2 h-2 rounded-full bg-amber-400";
-                statusText.innerText = "신호 미약 / 타채널 수신중";
-                statusText.className = "text-amber-400 font-bold";
-            } else {
-                statusDot.className = "w-2 h-2 rounded-full bg-rose-500";
-                statusText.innerText = "신호 없음 (단선/감쇄)";
-                statusText.className = "text-rose-400 font-bold";
-            }
-
-            // Draw Sine Waveform (Time Domain)
-            freqCtx.lineWidth = 2.5;
-            freqCtx.strokeStyle = activeSelectedFound ? '#00ffcc' : '#38bdf8';
-            freqCtx.beginPath();
-
-            const sliceWidth = width / timeData.length;
-            let x = 0;
-
-            for (let i = 0; i < timeData.length; i++) {
-                const v = timeData[i] / 128.0; // 0.0 ~ 2.0 (1.0 center)
-                const y = (v * height) / 2;
-
-                if (i === 0) {
-                    freqCtx.moveTo(x, y);
-                } else {
-                    freqCtx.lineTo(x, y);
+            // Update Peak Display Hz
+            let maxBin = 0, maxVal = 0;
+            for (let i = 0; i < freqData.length; i++) {
+                if (freqData[i] > maxVal) {
+                    maxVal = freqData[i];
+                    maxBin = i;
                 }
-                x += sliceWidth;
             }
+            const peakHz = Math.round(maxBin * binResolution);
+            measuredHzText.innerText = maxVal > 25 ? `수신 피크: ${peakHz} Hz` : `수신: -- Hz`;
 
-            freqCtx.lineTo(width, height / 2);
-            freqCtx.stroke();
+            // RENDER MODE 1: Spectrum Analyzer (전체 주파수 한번에 보기)
+            if (!selectedChannel) {
+                statusDot.className = activeCount > 0 ? "w-2 h-2 rounded-full bg-emerald-400 animate-pulse" : "w-2 h-2 rounded-full bg-slate-500";
+                statusText.innerText = activeCount > 0 ? `${activeCount}개 주파수 수신 중` : "수신 대기";
+                statusText.className = activeCount > 0 ? "text-emerald-400 font-bold" : "text-slate-400";
+
+                // Draw Spectrum Bars
+                const displayMaxHz = 8000;
+                const totalBins = Math.floor(displayMaxHz / binResolution);
+                const barWidth = width / totalBins;
+
+                for (let i = 0; i < totalBins; i++) {
+                    const val = freqData[i];
+                    if (val > 0) {
+                        const barHeight = (val / 255) * height;
+                        const x = i * barWidth;
+
+                        const hue = 200 - (val / 255) * 140; // Blue to Cyan/Green
+                        freqCtx.fillStyle = `hsl(${hue}, 100%, 50%)`;
+                        freqCtx.fillRect(x, height - barHeight, Math.max(1.5, barWidth), barHeight);
+                    }
+                }
+
+                // Guide Lines for Target Frequencies f1~f14
+                FREQ_TABLE.forEach(item => {
+                    const targetX = (item.target / displayMaxHz) * width;
+                    freqCtx.strokeStyle = 'rgba(6, 182, 212, 0.3)';
+                    freqCtx.lineWidth = 1;
+                    freqCtx.beginPath();
+                    freqCtx.moveTo(targetX, 0);
+                    freqCtx.lineTo(targetX, height);
+                    freqCtx.stroke();
+
+                    freqCtx.fillStyle = '#38bdf8';
+                    freqCtx.font = '9px sans-serif';
+                    freqCtx.fillText(item.id, targetX - 5, 12);
+                });
+            }
+            // RENDER MODE 2: Time-Domain Sine Wave (선택 채널 정현파 파형 보기)
+            else {
+                const timeData = new Uint8Array(analyser.fftSize);
+                analyser.getByteTimeDomainData(timeData);
+
+                statusDot.className = selectedActive ? "w-2 h-2 rounded-full bg-cyan-400 animate-ping" : "w-2 h-2 rounded-full bg-rose-500";
+                statusText.innerText = selectedActive ? "정현파 수신 양호" : "신호 미약 / 단선";
+                statusText.className = selectedActive ? "text-cyan-300 font-bold" : "text-rose-400 font-bold";
+
+                freqCtx.lineWidth = 2.5;
+                freqCtx.strokeStyle = selectedActive ? '#00ffcc' : '#f43f5e';
+                freqCtx.beginPath();
+
+                const sliceWidth = width / timeData.length;
+                let x = 0;
+
+                for (let i = 0; i < timeData.length; i++) {
+                    const v = timeData[i] / 128.0;
+                    const y = (v * height) / 2;
+
+                    if (i === 0) freqCtx.moveTo(x, y);
+                    else freqCtx.lineTo(x, y);
+
+                    x += sliceWidth;
+                }
+
+                freqCtx.lineTo(width, height / 2);
+                freqCtx.stroke();
+            }
         }
 
         // Screen Resize Responsive Handler
