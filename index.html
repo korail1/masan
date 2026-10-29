@@ -39,12 +39,8 @@
     <header class="bg-slate-900 border-b border-slate-800 p-3 sm:p-4 sticky top-0 z-50 shadow-md">
         <div class="max-w-4xl mx-auto flex items-center justify-between">
             <div class="flex items-center space-x-3">
-                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-white text-xl font-bold shadow-lg">
-                    <i class="fa-solid fa-microscope"></i>
-                </div>
                 <div>
                     <h1 class="text-base sm:text-lg font-bold text-slate-100 leading-tight">자동폐색장치 주파수 수신기</h1>
-                    <p class="text-xs text-slate-400">정현파 파형 분석 및 케이블/보안기 진단기</p>
                 </div>
             </div>
             <!-- Receiver Power Toggle Button -->
@@ -65,9 +61,9 @@
             <div class="flex items-center justify-between px-1">
                 <div class="flex items-center gap-2">
                     <span id="targetBadge" class="px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 text-xs font-bold">
-                        전체 스펙트럼 관측 모드 (FFT)
+                        전체 스펙트럼 관측 모드
                     </span>
-                    <span id="txrxLabel" class="text-xs font-mono text-slate-400">f1 ~ f14 전 채널 감시 중</span>
+                    <span id="txrxLabel" class="text-xs font-mono text-slate-400"></span>
                 </div>
                 <button id="resetViewBtn" onclick="selectChannel(null)" class="hidden text-[11px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-cyan-500/30 transition-all font-semibold">
                     <i class="fa-solid fa-chart-simple mr-1"></i>전체 스펙트럼 보기
@@ -91,7 +87,7 @@
             </div>
 
             <div class="flex justify-between items-center text-[11px] text-slate-400 px-1">
-                <span id="modeHelpText"><i class="fa-solid fa-circle-info mr-1 text-cyan-400"></i>채널 상자를 누르면 개별 정현파 파형(보안기/케이블 깨짐)을 검사합니다.</span>
+                <span id="modeHelpText"></span>
                 <span id="measuredHzText" class="font-mono text-emerald-400 font-bold">-- Hz</span>
             </div>
         </div>
@@ -112,7 +108,7 @@
 
     <!-- Footer -->
     <footer class="text-center py-3 text-slate-500 text-[11px] border-t border-slate-800/80">
-        자동폐색장치 정현파 주파수 검사기 &copy; 2026
+        자동폐색장치 주파수 수신기 &copy; 2026
     </footer>
 
     <script>
@@ -191,17 +187,17 @@
             selectedChannel = item;
             
             if (item) {
-                targetBadge.innerText = `${item.id} (${item.target}Hz) 파형 관측`;
+                targetBadge.innerText = `${item.id} (${item.target}Hz)`;
                 targetBadge.className = "px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-xs font-bold";
-                txrxLabel.innerText = `TX: ${item.tx} / RX: ${item.rx}`;
+                txrxLabel.innerText = "";
                 resetViewBtn.classList.remove("hidden");
-                modeHelpText.innerHTML = `<i class="fa-solid fa-circle-info mr-1 text-cyan-400"></i>정현파 파형이 일정한지, 찌그러짐(클리핑)이 없는지 확인하세요.`;
+                modeHelpText.innerHTML = "";
             } else {
-                targetBadge.innerText = `전체 스펙트럼 관측 모드 (FFT)`;
+                targetBadge.innerText = `전체 스펙트럼 관측 모드`;
                 targetBadge.className = "px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 text-xs font-bold";
-                txrxLabel.innerText = `f1 ~ f14 전 채널 감시 중`;
+                txrxLabel.innerText = "";
                 resetViewBtn.classList.add("hidden");
-                modeHelpText.innerHTML = `<i class="fa-solid fa-circle-info mr-1 text-cyan-400"></i>채널 상자를 누르면 개별 정현파 파형(보안기/케이블 깨짐)을 검사합니다.`;
+                modeHelpText.innerHTML = "";
             }
             
             // Re-render UI borders for selected channel
