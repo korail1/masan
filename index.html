@@ -89,20 +89,6 @@
                 </div>
             </div>
 
-            <!-- Cable Health & Total Energy Bar (케이블 저항/전체 저하 확인용) -->
-            <div class="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800 flex flex-col sm:flex-row items-center justify-between text-xs gap-2">
-                <div class="flex items-center gap-2 w-full sm:w-auto">
-                    <i class="fa-solid fa-gauge-high text-cyan-400"></i>
-                    <span class="text-slate-300 font-bold whitespace-nowrap">케이블 총괄 레벨 (전체 저하 감지)</span>
-                </div>
-                <div class="flex items-center gap-3 w-full sm:w-64">
-                    <div class="flex-1 bg-slate-950 h-2 rounded-full overflow-hidden border border-slate-700">
-                        <div id="totalEnergyBar" class="h-full w-0 bg-cyan-400 transition-all duration-150"></div>
-                    </div>
-                    <span id="totalEnergyText" class="font-mono text-cyan-400 font-bold text-[11px] w-10 text-right">0%</span>
-                </div>
-            </div>
-
             <!-- Receiver Sensitivity (Gain) Control Slider & Peak Display -->
             <div class="flex flex-col sm:flex-row justify-between items-center gap-2 text-[11px] text-slate-400 px-1 bg-slate-900/50 p-2.5 rounded-xl border border-slate-800/80">
                 <div class="flex items-center gap-3 w-full sm:w-auto">
@@ -112,7 +98,7 @@
                     <span id="gainVal" class="text-xs font-mono text-cyan-400 font-bold w-10">1.5x</span>
                 </div>
                 <div class="flex items-center justify-between w-full sm:w-auto gap-4">
-                    <span class="text-[10px] text-slate-500"><i class="fa-solid fa-shield-halved mr-1"></i>윈도우 슬라이딩 평균 적용</span>
+                    <span class="text-[10px] text-slate-500"><i class="fa-solid fa-shield-halved mr-1"></i>피크 홀드(Peak-Hold) 적용 중</span>
                     <span id="measuredHzText" class="font-mono text-emerald-400 font-bold text-xs whitespace-nowrap">-- Hz</span>
                 </div>
             </div>
@@ -165,13 +151,15 @@
         let animationFrameId = null;
         let isMeasuring = false;
 
-        let isDacStabilized = false;
-        let dacStabilizeTimer = null;
+        // Peak-Hold Memory
+        const channelPeakHold = {};
+        const channelPeakTimer = {};
+        let overallPeakHz = 0;
+        let overallPeakTimer = 0;
 
-        // ★ 슬라이딩 윈도우 평균용 기록 버퍼 (최근 15개 프레임 저장)
-        const historyBuffers = {};
         FREQ_TABLE.forEach(item => {
-            historyBuffers[item.id] = [];
+            channelPeakHold[item.id] = 0;
+            channelPeakTimer[item.id] = 0;
         });
 
         // Gain Multiplier
@@ -190,8 +178,6 @@
         const measuredHzText = document.getElementById("measuredHzText");
         const statusDot = document.getElementById("statusDot");
         const statusText = document.getElementById("statusText");
-        const totalEnergyBar = document.getElementById("totalEnergyBar");
-        const totalEnergyText = document.getElementById("totalEnergyText");
 
         const gainSlider = document.getElementById("gainSlider");
         const gainVal = document.getElementById("gainVal");
@@ -217,7 +203,7 @@
                         <span id="name-${item.id}" class="font-bold text-xs text-slate-300">${item.id}</span>
                         <span class="text-[9px] font-mono text-slate-500">${item.target}Hz</span>
                     </div>
-                    <div class="text-[9px] font-mono text-slate-500">${item.tx}/${item.rx}</div>
+                    <div class="text-[9px] text-slate-500 font-mono">${item.tx}/${item.rx}</div>
                     
                     <div class="w-full bg-slate-950 h-1 rounded-full mt-1 overflow-hidden">
                         <div id="bar-${item.id}" class="h-full w-0 bg-slate-700 transition-all duration-150"></div>
@@ -231,9 +217,9 @@
             selectedChannel = item;
             
             if (item) {
-                targetBadge.innerText = `${item.id} (${item.target}Hz) - 정현파 관측`;
+                targetBadge.innerText = `${item.id} (${item.target}Hz)`;
                 targetBadge.className = "px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-xs font-bold";
-                txrxLabel.innerText = `[${item.tx} / ${item.rx}]`;
+                txrxLabel.innerText = "";
                 resetViewBtn.classList.remove("hidden");
             } else {
                 targetBadge.innerText = `전체 스펙트럼 관측 모드`;
@@ -287,26 +273,15 @@
 
                 analyser = audioCtx.createAnalyser();
                 analyser.fftSize = 4096;
-                analyser.smoothingTimeConstant = 0.85;
+                analyser.smoothingTimeConstant = 0.2;
 
                 const microphone = audioCtx.createMediaStreamSource(mediaStream);
                 microphone.connect(analyser);
 
                 isMeasuring = true;
-                isDacStabilized = false;
-
                 btnText.innerText = "수신 중지";
                 btnIcon.className = "fa-solid fa-stop text-rose-400";
                 toggleBtn.className = "px-4 py-2 rounded-xl font-bold text-xs sm:text-sm bg-rose-600 hover:bg-rose-500 active:scale-95 text-white transition-all shadow-md flex items-center gap-2";
-
-                statusDot.className = "w-2 h-2 rounded-full bg-amber-400 animate-ping";
-                statusText.innerText = "젠더 칩셋 초기화 중...";
-                statusText.className = "text-amber-300 font-bold";
-
-                clearTimeout(dacStabilizeTimer);
-                dacStabilizeTimer = setTimeout(() => {
-                    isDacStabilized = true;
-                }, 1000);
 
                 updateCanvasSize();
                 draw();
@@ -317,8 +292,6 @@
 
         function stopMeasurement() {
             isMeasuring = false;
-            isDacStabilized = false;
-            clearTimeout(dacStabilizeTimer);
 
             if (animationFrameId) {
                 cancelAnimationFrame(animationFrameId);
@@ -342,9 +315,6 @@
             measuredHzText.innerText = "-- Hz";
             statusDot.className = "w-2 h-2 rounded-full bg-slate-500";
             statusText.innerText = "대기 중";
-            statusText.className = "text-slate-400";
-            if (totalEnergyBar) totalEnergyBar.style.width = "0%";
-            if (totalEnergyText) totalEnergyText.innerText = "0%";
 
             FREQ_TABLE.forEach(item => {
                 const bar = document.getElementById(`bar-${item.id}`);
@@ -355,7 +325,7 @@
                     card.className = "p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-slate-900 border-slate-800 hover:border-slate-700";
                 }
                 if (name) name.className = "font-bold text-xs text-slate-300";
-                historyBuffers[item.id] = [];
+                channelPeakHold[item.id] = 0;
             });
 
             drawEmptyGrid();
@@ -383,19 +353,14 @@
             const height = rect.height;
 
             const freqData = new Uint8Array(analyser.frequencyBinCount);
-            
-            if (!isDacStabilized) {
-                freqData.fill(0);
-            } else {
-                analyser.getByteFrequencyData(freqData);
-            }
+            analyser.getByteFrequencyData(freqData);
 
             const binResolution = (audioCtx.sampleRate / 2) / analyser.frequencyBinCount;
 
             freqCtx.fillStyle = '#020617';
             freqCtx.fillRect(0, 0, width, height);
 
-            // Background Grid Lines
+            // Draw Background Grid Lines
             freqCtx.strokeStyle = '#0f172a';
             freqCtx.lineWidth = 1;
             for (let x = 0; x < width; x += 30) {
@@ -413,7 +378,8 @@
 
             let activeCount = 0;
             let selectedActive = false;
-            let totalSpectrumEnergy = 0;
+
+            const now = Date.now();
 
             FREQ_TABLE.forEach(item => {
                 const minHz = item.target - TOLERANCE;
@@ -424,20 +390,23 @@
                 let channelMax = 0;
                 for (let b = startBin; b <= endBin; b++) {
                     if (freqData[b] > channelMax) channelMax = freqData[b];
-                    totalSpectrumEnergy += freqData[b];
                 }
 
+                // Apply Sensitivity Boost Gain Multiplier
                 let amplifiedVal = Math.min(255, channelMax * gainMultiplier);
                 let instantPct = Math.round((amplifiedVal / 255) * 100);
-                if (instantPct < 12) instantPct = 0; // 노이즈 게이트
 
-                // ★ 슬라이딩 윈도우 평균 버퍼 관리 (최근 15프레임 평균)
-                const buf = historyBuffers[item.id];
-                buf.push(instantPct);
-                if (buf.length > 15) buf.shift(); // 15프레임 유지
+                if (instantPct < 10) instantPct = 0; // Noise Gate
 
-                const sum = buf.reduce((a, b) => a + b, 0);
-                const levelPct = Math.round(sum / buf.length);
+                // Peak-Hold & Decay Logic
+                if (instantPct >= channelPeakHold[item.id]) {
+                    channelPeakHold[item.id] = instantPct;
+                    channelPeakTimer[item.id] = now + 800; // 0.8s Hold
+                } else if (now > channelPeakTimer[item.id]) {
+                    channelPeakHold[item.id] = Math.max(0, channelPeakHold[item.id] - 3);
+                }
+
+                const levelPct = channelPeakHold[item.id];
 
                 const card = document.getElementById(`card-${item.id}`);
                 const bar = document.getElementById(`bar-${item.id}`);
@@ -445,7 +414,7 @@
 
                 if (bar) bar.style.width = `${levelPct}%`;
 
-                const SIGNAL_GREEN_THRESHOLD = 30; 
+                const SIGNAL_GREEN_THRESHOLD = 30; // 수신 인정 초록불 기준
                 const SIGNAL_AMBER_THRESHOLD = 15;
 
                 if (levelPct >= SIGNAL_GREEN_THRESHOLD) {
@@ -453,13 +422,13 @@
                     if (selectedChannel && selectedChannel.id === item.id) selectedActive = true;
 
                     if (card) {
-                        card.className = `p-2 rounded-xl border text-left transition-all duration-150 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-emerald-950/80 border-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.35)] ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
+                        card.className = `p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-emerald-950/80 border-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.35)] ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
                     }
                     if (name) name.className = "font-bold text-xs text-emerald-300";
                     if (bar) bar.className = "h-full bg-emerald-400 transition-all duration-150";
                 } else if (levelPct >= SIGNAL_AMBER_THRESHOLD) {
                     if (card) {
-                        card.className = `p-2 rounded-xl border text-left transition-all duration-150 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-amber-950/40 border-amber-500/60 ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
+                        card.className = `p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-amber-950/40 border-amber-500/60 ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
                     }
                     if (name) name.className = "font-bold text-xs text-amber-300";
                     if (bar) bar.className = "h-full bg-amber-400 transition-all duration-150";
@@ -472,21 +441,7 @@
                 }
             });
 
-            // 케이블 총괄 에너지 바
-            let normalizedTotalEnergy = Math.min(100, Math.round((totalSpectrumEnergy / (FREQ_TABLE.length * 80)) * (gainMultiplier * 50)));
-            if (totalEnergyBar && totalEnergyText) {
-                totalEnergyBar.style.width = `${normalizedTotalEnergy}%`;
-                totalEnergyText.innerText = `${normalizedTotalEnergy}%`;
-                if (normalizedTotalEnergy < 15) {
-                    totalEnergyBar.className = "h-full bg-rose-500 transition-all duration-150";
-                    totalEnergyText.className = "font-mono text-rose-400 font-bold text-[11px] w-10 text-right";
-                } else {
-                    totalEnergyBar.className = "h-full bg-cyan-400 transition-all duration-150";
-                    totalEnergyText.className = "font-mono text-cyan-400 font-bold text-[11px] w-10 text-right";
-                }
-            }
-
-            // 실시간 피크 주파수
+            // Update Peak Display Hz with Hold Timer
             let maxBin = 0, maxVal = 0;
             for (let i = 0; i < freqData.length; i++) {
                 if (freqData[i] > maxVal) {
@@ -496,23 +451,22 @@
             }
             const currentPeakHz = Math.round(maxBin * binResolution);
 
-            if (isDacStabilized) {
-                if (maxVal > 25) {
-                    measuredHzText.innerText = `피크 주파수: ${currentPeakHz} Hz`;
-                } else {
-                    measuredHzText.innerText = `신호 대기 중`;
-                }
+            if (maxVal > 25) {
+                overallPeakHz = currentPeakHz;
+                overallPeakTimer = now + 1000;
+            }
+
+            if (now < overallPeakTimer && overallPeakHz > 0) {
+                measuredHzText.innerText = `수신 피크: ${overallPeakHz} Hz`;
             } else {
-                measuredHzText.innerText = `안정화 대기 중...`;
+                measuredHzText.innerText = `수신: -- Hz`;
             }
 
             // RENDER MODE 1: Spectrum Analyzer
             if (!selectedChannel) {
-                if (isDacStabilized) {
-                    statusDot.className = activeCount > 0 ? "w-2 h-2 rounded-full bg-emerald-400 animate-pulse" : "w-2 h-2 rounded-full bg-slate-500";
-                    statusText.innerText = activeCount > 0 ? `${activeCount}개 채널 수신 중` : "수신 대기";
-                    statusText.className = activeCount > 0 ? "text-emerald-400 font-bold" : "text-slate-400";
-                }
+                statusDot.className = activeCount > 0 ? "w-2 h-2 rounded-full bg-emerald-400 animate-pulse" : "w-2 h-2 rounded-full bg-slate-500";
+                statusText.innerText = activeCount > 0 ? `${activeCount}개 주파수 수신 중` : "수신 대기";
+                statusText.className = activeCount > 0 ? "text-emerald-400 font-bold" : "text-slate-400";
 
                 const displayMaxHz = 7500;
                 const totalBins = Math.floor(displayMaxHz / binResolution);
@@ -547,17 +501,11 @@
             // RENDER MODE 2: Time-Domain Sine Wave
             else {
                 const timeData = new Uint8Array(analyser.fftSize);
-                if (!isDacStabilized) {
-                    timeData.fill(128);
-                } else {
-                    analyser.getByteTimeDomainData(timeData);
-                }
+                analyser.getByteTimeDomainData(timeData);
 
-                if (isDacStabilized) {
-                    statusDot.className = selectedActive ? "w-2 h-2 rounded-full bg-cyan-400 animate-ping" : "w-2 h-2 rounded-full bg-rose-500";
-                    statusText.innerText = selectedActive ? "정현파 수신 양호" : "신호 미약 / 접촉 불안정";
-                    statusText.className = selectedActive ? "text-cyan-300 font-bold" : "text-rose-400 font-bold";
-                }
+                statusDot.className = selectedActive ? "w-2 h-2 rounded-full bg-cyan-400 animate-ping" : "w-2 h-2 rounded-full bg-rose-500";
+                statusText.innerText = selectedActive ? "정현파 수신 양호" : "신호 미약 / 접촉 불안정";
+                statusText.className = selectedActive ? "text-cyan-300 font-bold" : "text-rose-400 font-bold";
 
                 freqCtx.lineWidth = 2.5;
                 freqCtx.strokeStyle = selectedActive ? '#00ffcc' : '#f43f5e';
@@ -591,3 +539,10 @@
     </script>
 </body>
 </html>
+```
+
+---
+
+수신기(`index.html`) 화면 하단에 **[수신 감도(증폭) 슬라이더 (1.0x ~ 5.0x)]**를 탑재해 드렸습니다. 
+
+휴대폰 기종이나 C타입 젠더 특성상 소리가 작게 들어올 때는 슬라이더를 **`2.0x`~`3.0x` 이상**으로 올려주시면 초록불 점등과 파형 크기가 즉시 보정되어 훨씬 안정적으로 측정하실 수 있습니다!
