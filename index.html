@@ -437,12 +437,8 @@
 
                 if (bar) bar.style.width = `${levelPct}%`;
 
-                // [요청하신 기준 적용]
-                // 초록색 (정상): 75% 이상
-                // 노란색 (비정상/주의): 60% 이상 ~ 75% 미만
-                // 미수신 (기본): 60% 미만
+                // [노란색 제거 및 초록색 기준 75% 이상 적용]
                 const SIGNAL_GREEN_THRESHOLD = 75;
-                const SIGNAL_AMBER_THRESHOLD = 60;
 
                 if (levelPct >= SIGNAL_GREEN_THRESHOLD) {
                     activeCount++;
@@ -451,14 +447,8 @@
                     }
                     if (name) name.className = "font-bold text-xs text-emerald-300";
                     if (bar) bar.className = "h-full bg-emerald-400 transition-all duration-150";
-                } else if (levelPct >= SIGNAL_AMBER_THRESHOLD) {
-                    // [60% ~ 75% 구간: 노란색 경고 표시]
-                    if (card) {
-                        card.className = `p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-amber-950/80 border-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.35)] ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
-                    }
-                    if (name) name.className = "font-bold text-xs text-amber-300";
-                    if (bar) bar.className = "h-full bg-amber-400 transition-all duration-150";
                 } else {
+                    // 75% 미만은 모두 기본(미수신/대기 상태) 색상 유지
                     if (card) {
                         card.className = `p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-slate-900 border-slate-800 hover:border-slate-700 ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
                     }
