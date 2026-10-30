@@ -259,9 +259,9 @@
                         echoCancellation: false,
                         noiseSuppression: false,
                         autoGainControl: false,
-                        googEchoCancellation: false,
-                        googNoiseSuppression: false,
                         googAutoGainControl: false,
+                        googElementAudioProcessing: false,
+                        googNoiseSuppression: false,
                         googHighpassFilter: false
                     },
                     video: false
@@ -413,11 +413,14 @@
                 }
 
                 let amplifiedVal = Math.min(255, channelMax * gainMultiplier);
-                let instantPct = Math.round((amplifiedVal / 255) * 100);
+                
+                // [Guhindura gato agaciro k'ubwinshi bw'amajwi kugira ngo igabanuka rito ryose ryigaragaze cyane ku maso]
+                let normalizedVal = amplifiedVal / 255;
+                let instantPct = Math.round(Math.pow(normalizedVal, 1.25) * 100);
 
                 if (instantPct < 10) instantPct = 0;
 
-                // Peak Hold & Decay (원래의 매끄러운 타이머 유지)
+                // Peak Hold & Decay
                 if (instantPct >= channelPeakHold[item.id]) {
                     channelPeakHold[item.id] = instantPct;
                     channelPeakTimer[item.id] = now + 800;
@@ -433,7 +436,6 @@
 
                 if (bar) bar.style.width = `${levelPct}%`;
 
-                // [안정적인 75% 기준선]
                 const SIGNAL_GREEN_THRESHOLD = 75;
 
                 if (levelPct >= SIGNAL_GREEN_THRESHOLD) {
