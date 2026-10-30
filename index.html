@@ -254,23 +254,25 @@
 
         async function startMeasurement() {
             try {
-                // 모바일 AGC 및 오디오 프로세싱 강제 차단 제약 조건
                 const constraints = {
                     audio: {
                         echoCancellation: false,
                         noiseSuppression: false,
                         autoGainControl: false,
+                        googEchoCancellation: false,
+                        googEchoCancellation2: false,
                         googAutoGainControl: false,
-                        googElementAudioProcessing: false,
+                        googAutoGainControl2: false,
                         googNoiseSuppression: false,
-                        googHighpassFilter: false
+                        googNoiseSuppression2: false,
+                        googHighpassFilter: false,
+                        googAudioMirroring: false
                     },
                     video: false
                 };
 
                 mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
 
-                // 모바일 브라우저 대응: 트랙에 제약 조건 강제 재적용
                 const audioTrack = mediaStream.getAudioTracks()[0];
                 if (audioTrack && typeof audioTrack.applyConstraints === 'function') {
                     await audioTrack.applyConstraints({
@@ -286,11 +288,17 @@
                 }
 
                 analyser = audioCtx.createAnalyser();
-                analyser.fftSize = 4096;
-                analyser.smoothingTimeConstant = 0.2;
+                analyser.fftSize = 2048;
+                analyser.smoothingTimeConstant = 0.1;
 
                 microphoneNode = audioCtx.createMediaStreamSource(mediaStream);
+                
+                const gainNode = audioCtx.createGain();
+                gainNode.gain.value = 1.0;
+                
                 microphoneNode.connect(analyser);
+                analyser.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
 
                 isMeasuring = true;
                 btnText.innerText = "수신 중지";
@@ -357,6 +365,8 @@
             freqCtx.stroke();
         }
 
+        let freqData = null;
+
         function draw() {
             if (!isMeasuring) return;
 
@@ -366,7 +376,9 @@
             const width = rect.width;
             const height = rect.height;
 
-            const freqData = new Uint8Array(analyser.frequencyBinCount);
+            if (!freqData || freqData.length !== analyser.frequencyBinCount) {
+                freqData = new Uint8Array(analyser.frequencyBinCount);
+            }
             analyser.getByteFrequencyData(freqData);
 
             const binResolution = (audioCtx.sampleRate / 2) / analyser.frequencyBinCount;
@@ -425,8 +437,12 @@
 
                 if (bar) bar.style.width = `${levelPct}%`;
 
-                const SIGNAL_GREEN_THRESHOLD = 30;
-                const SIGNAL_AMBER_THRESHOLD = 15;
+                // [요청하신 기준 적용]
+                // 초록색 (정상): 75% 이상
+                // 노란색 (비정상/주의): 60% 이상 ~ 75% 미만
+                // 미수신 (기본): 60% 미만
+                const SIGNAL_GREEN_THRESHOLD = 75;
+                const SIGNAL_AMBER_THRESHOLD = 60;
 
                 if (levelPct >= SIGNAL_GREEN_THRESHOLD) {
                     activeCount++;
@@ -436,8 +452,9 @@
                     if (name) name.className = "font-bold text-xs text-emerald-300";
                     if (bar) bar.className = "h-full bg-emerald-400 transition-all duration-150";
                 } else if (levelPct >= SIGNAL_AMBER_THRESHOLD) {
+                    // [60% ~ 75% 구간: 노란색 경고 표시]
                     if (card) {
-                        card.className = `p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-amber-950/40 border-amber-500/60 ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
+                        card.className = `p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-amber-950/80 border-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.35)] ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
                     }
                     if (name) name.className = "font-bold text-xs text-amber-300";
                     if (bar) bar.className = "h-full bg-amber-400 transition-all duration-150";
