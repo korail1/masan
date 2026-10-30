@@ -254,13 +254,31 @@
 
         async function startMeasurement() {
             try {
-                mediaStream = await navigator.mediaDevices.getUserMedia({
+                // 모바일 AGC 및 오디오 프로세싱 강제 차단 제약 조건
+                const constraints = {
                     audio: {
                         echoCancellation: false,
                         noiseSuppression: false,
+                        autoGainControl: false,
+                        googAutoGainControl: false,
+                        googElementAudioProcessing: false,
+                        googNoiseSuppression: false,
+                        googHighpassFilter: false
+                    },
+                    video: false
+                };
+
+                mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+
+                // 모바일 브라우저 대응: 트랙에 제약 조건 강제 재적용
+                const audioTrack = mediaStream.getAudioTracks()[0];
+                if (audioTrack && typeof audioTrack.applyConstraints === 'function') {
+                    await audioTrack.applyConstraints({
+                        echoCancellation: false,
+                        noiseSuppression: false,
                         autoGainControl: false
-                    }
-                });
+                    }).catch(e => console.log("Apply constraints warning:", e));
+                }
 
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                 if (audioCtx.state === 'suspended') {
