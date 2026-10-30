@@ -259,14 +259,10 @@
                         echoCancellation: false,
                         noiseSuppression: false,
                         autoGainControl: false,
-                        googEchoCancellation: false,
-                        googEchoCancellation2: false,
                         googAutoGainControl: false,
-                        googAutoGainControl2: false,
+                        googElementAudioProcessing: false,
                         googNoiseSuppression: false,
-                        googNoiseSuppression2: false,
-                        googHighpassFilter: false,
-                        googAudioMirroring: false
+                        googHighpassFilter: false
                     },
                     video: false
                 };
@@ -417,7 +413,11 @@
                 }
 
                 let amplifiedVal = Math.min(255, channelMax * gainMultiplier);
-                let instantPct = Math.round((amplifiedVal / 255) * 100);
+                let rawPct = amplifiedVal / 255;
+
+                // [볼륨 낙폭 체감 증폭 공식 (비선형 감지)]
+                // 신호가 조금만 떨어져도 체감 퍼센트가 확 꺾이도록 제곱(Square) 커브 적용
+                let instantPct = Math.round(Math.pow(rawPct, 1.6) * 100);
 
                 if (instantPct < 10) instantPct = 0;
 
@@ -437,7 +437,8 @@
 
                 if (bar) bar.style.width = `${levelPct}%`;
 
-                // [노란색 제거 및 초록색 기준 75% 이상 적용]
+                // [초록색 기준: 75% 이상일 때만 확실한 정상(초록불)]
+                // 조금이라도 떨어져서 75% 밑으로 내려가면 즉시 초록불이 꺼지도록 설정
                 const SIGNAL_GREEN_THRESHOLD = 75;
 
                 if (levelPct >= SIGNAL_GREEN_THRESHOLD) {
@@ -448,7 +449,6 @@
                     if (name) name.className = "font-bold text-xs text-emerald-300";
                     if (bar) bar.className = "h-full bg-emerald-400 transition-all duration-150";
                 } else {
-                    // 75% 미만은 모두 기본(미수신/대기 상태) 색상 유지
                     if (card) {
                         card.className = `p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-slate-900 border-slate-800 hover:border-slate-700 ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
                     }
