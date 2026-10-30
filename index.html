@@ -284,17 +284,11 @@
                 }
 
                 analyser = audioCtx.createAnalyser();
-                analyser.fftSize = 2048;
-                analyser.smoothingTimeConstant = 0.1;
+                analyser.fftSize = 4096;
+                analyser.smoothingTimeConstant = 0.2;
 
                 microphoneNode = audioCtx.createMediaStreamSource(mediaStream);
-                
-                const gainNode = audioCtx.createGain();
-                gainNode.gain.value = 1.0;
-                
                 microphoneNode.connect(analyser);
-                analyser.connect(gainNode);
-                gainNode.connect(audioCtx.destination);
 
                 isMeasuring = true;
                 btnText.innerText = "수신 중지";
@@ -361,8 +355,6 @@
             freqCtx.stroke();
         }
 
-        let freqData = null;
-
         function draw() {
             if (!isMeasuring) return;
 
@@ -372,9 +364,7 @@
             const width = rect.width;
             const height = rect.height;
 
-            if (!freqData || freqData.length !== analyser.frequencyBinCount) {
-                freqData = new Uint8Array(analyser.frequencyBinCount);
-            }
+            const freqData = new Uint8Array(analyser.frequencyBinCount);
             analyser.getByteFrequencyData(freqData);
 
             const binResolution = (audioCtx.sampleRate / 2) / analyser.frequencyBinCount;
@@ -413,10 +403,7 @@
                 }
 
                 let amplifiedVal = Math.min(255, channelMax * gainMultiplier);
-                
-                // [Guhindura gato agaciro k'ubwinshi bw'amajwi kugira ngo igabanuka rito ryose ryigaragaze cyane ku maso]
-                let normalizedVal = amplifiedVal / 255;
-                let instantPct = Math.round(Math.pow(normalizedVal, 1.25) * 100);
+                let instantPct = Math.round((amplifiedVal / 255) * 100);
 
                 if (instantPct < 10) instantPct = 0;
 
@@ -436,6 +423,7 @@
 
                 if (bar) bar.style.width = `${levelPct}%`;
 
+                // [사용자님이 주신 원본 코드 기준에서 퍼센트만 75%로 지정]
                 const SIGNAL_GREEN_THRESHOLD = 75;
 
                 if (levelPct >= SIGNAL_GREEN_THRESHOLD) {
