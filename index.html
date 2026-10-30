@@ -423,8 +423,9 @@
 
                 if (bar) bar.style.width = `${levelPct}%`;
 
-                // [사용자님이 주신 원본 코드 기준에서 퍼센트만 75%로 지정]
+                // [판정 기준: 75% 이상 초록색, 60%~75% 미만 노란색]
                 const SIGNAL_GREEN_THRESHOLD = 75;
+                const SIGNAL_AMBER_THRESHOLD = 60;
 
                 if (levelPct >= SIGNAL_GREEN_THRESHOLD) {
                     activeCount++;
@@ -433,6 +434,13 @@
                     }
                     if (name) name.className = "font-bold text-xs text-emerald-300";
                     if (bar) bar.className = "h-full bg-emerald-400 transition-all duration-150";
+                } else if (levelPct >= SIGNAL_AMBER_THRESHOLD) {
+                    // 60% ~ 75% 구간 노란색 경고
+                    if (card) {
+                        card.className = `p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-amber-950/80 border-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.35)] ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
+                    }
+                    if (name) name.className = "font-bold text-xs text-amber-300";
+                    if (bar) bar.className = "h-full bg-amber-400 transition-all duration-150";
                 } else {
                     if (card) {
                         card.className = `p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-slate-900 border-slate-800 hover:border-slate-700 ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
