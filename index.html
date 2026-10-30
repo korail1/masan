@@ -254,27 +254,23 @@
 
         async function startMeasurement() {
             try {
-                // 모바일 OS 및 브라우저의 모든 자동 보정(AGC, 노이즈 필터, 에코 캔슬링)을 강제 차단하는 제약 조건
+                // 모바일 AGC 및 오디오 프로세싱 강제 차단 제약 조건
                 const constraints = {
                     audio: {
                         echoCancellation: false,
                         noiseSuppression: false,
                         autoGainControl: false,
-                        googEchoCancellation: false,
-                        googEchoCancellation2: false,
                         googAutoGainControl: false,
-                        googAutoGainControl2: false,
+                        googElementAudioProcessing: false,
                         googNoiseSuppression: false,
-                        googNoiseSuppression2: false,
-                        googHighpassFilter: false,
-                        googAudioMirroring: false
+                        googHighpassFilter: false
                     },
                     video: false
                 };
 
                 mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
 
-                // 모바일 브라우저 대응: 오디오 트랙에 직접 제약 조건 강제 재적용
+                // 모바일 브라우저 대응: 트랙에 제약 조건 강제 재적용
                 const audioTrack = mediaStream.getAudioTracks()[0];
                 if (audioTrack && typeof audioTrack.applyConstraints === 'function') {
                     await audioTrack.applyConstraints({
@@ -290,18 +286,11 @@
                 }
 
                 analyser = audioCtx.createAnalyser();
-                analyser.fftSize = 2048; // 끊김 현상 완화를 위한 버퍼 최적화
-                analyser.smoothingTimeConstant = 0.1;
+                analyser.fftSize = 4096;
+                analyser.smoothingTimeConstant = 0.2;
 
                 microphoneNode = audioCtx.createMediaStreamSource(mediaStream);
-                
-                // 오디오 파이프라인 안정화 (드롭 방지)
-                const gainNode = audioCtx.createGain();
-                gainNode.gain.value = 1.0;
-                
                 microphoneNode.connect(analyser);
-                analyser.connect(gainNode);
-                gainNode.connect(audioCtx.destination);
 
                 isMeasuring = true;
                 btnText.innerText = "수신 중지";
@@ -368,9 +357,6 @@
             freqCtx.stroke();
         }
 
-        // 메모리 재할당 방지용 버퍼 변수 (가비지 컬렉션 딜레이 및 2초 주기 휭휭 튐 방지)
-        let freqData = null;
-
         function draw() {
             if (!isMeasuring) return;
 
@@ -380,9 +366,7 @@
             const width = rect.width;
             const height = rect.height;
 
-            if (!freqData || freqData.length !== analyser.frequencyBinCount) {
-                freqData = new Uint8Array(analyser.frequencyBinCount);
-            }
+            const freqData = new Uint8Array(analyser.frequencyBinCount);
             analyser.getByteFrequencyData(freqData);
 
             const binResolution = (audioCtx.sampleRate / 2) / analyser.frequencyBinCount;
