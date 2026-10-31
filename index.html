@@ -391,64 +391,65 @@
             let activeCount = 0;
             const now = Date.now();
 
-            FREQ_TABLE.forEach(item => {
-                const minHz = item.target - TOLERANCE;
-                const maxHz = item.target + TOLERANCE;
-                const startBin = Math.floor(minHz / binResolution);
-                const endBin = Math.ceil(maxHz / binResolution);
+   FREQ_TABLE.forEach(item => {
+    const minHz = item.target - TOLERANCE;
+    const maxHz = item.target + TOLERANCE;
+    const startBin = Math.floor(minHz / binResolution);
+    const endBin = Math.ceil(maxHz / binResolution);
 
-                let channelMax = 0;
-                for (let b = startBin; b <= endBin; b++) {
-                    if (freqData[b] > channelMax) channelMax = freqData[b];
-                }
+    let channelMax = 0;
+    for (let b = startBin; b <= endBin; b++) {
+        if (freqData[b] > channelMax) channelMax = freqData[b];
+    }
 
-                let amplifiedVal = Math.min(255, channelMax * gainMultiplier);
-                let instantPct = Math.round((amplifiedVal / 255) * 100);
+    let amplifiedVal = Math.min(255, channelMax * gainMultiplier);
+    let instantPct = Math.round((amplifiedVal / 255) * 100);
 
-                if (instantPct < 10) instantPct = 0;
+    if (instantPct < 10) instantPct = 0;
 
-                // Peak Hold & Decay
-                if (instantPct >= channelPeakHold[item.id]) {
-                    channelPeakHold[item.id] = instantPct;
-                    channelPeakTimer[item.id] = now + 800;
-                } else if (now > channelPeakTimer[item.id]) {
-                    channelPeakHold[item.id] = Math.max(0, channelPeakHold[item.id] - 3);
-                }
+    // Peak Hold & Decay
+    if (instantPct >= channelPeakHold[item.id]) {
+        channelPeakHold[item.id] = instantPct;
+        channelPeakTimer[item.id] = now + 800;
+    } else if (now > channelPeakTimer[item.id]) {
+        channelPeakHold[item.id] = Math.max(0, channelPeakHold[item.id] - 3);
+    }
 
-                const levelPct = channelPeakHold[item.id];
+    const levelPct = channelPeakHold[item.id];
 
-                const card = document.getElementById(`card-${item.id}`);
-                const bar = document.getElementById(`bar-${item.id}`);
-                const name = document.getElementById(`name-${item.id}`);
+    const card = document.getElementById(`card-${item.id}`);
+    const bar = document.getElementById(`bar-${item.id}`);
+    const name = document.getElementById(`name-${item.id}`);
 
-                if (bar) bar.style.width = `${levelPct}%`;
+    // 게이지바 폭 (100을 넘어도 바가 깨지지 않게 최대 100으로 제한)
+    if (bar) bar.style.width = `${Math.min(100, levelPct)}%`;
 
-                // [판정 기준: 75% 이상 초록색, 60%~75% 미만 노란색]
-                const SIGNAL_GREEN_THRESHOLD = 75;
-                const SIGNAL_AMBER_THRESHOLD = 60;
-
-                if (levelPct >= SIGNAL_GREEN_THRESHOLD) {
-                    activeCount++;
-                    if (card) {
-                        card.className = `p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-emerald-950/80 border-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.35)] ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
-                    }
-                    if (name) name.className = "font-bold text-xs text-emerald-300";
-                    if (bar) bar.className = "h-full bg-emerald-400 transition-all duration-150";
-                } else if (levelPct >= SIGNAL_AMBER_THRESHOLD) {
-                    // 60% ~ 75% 구간 노란색 경고
-                    if (card) {
-                        card.className = `p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-amber-950/80 border-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.35)] ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
-                    }
-                    if (name) name.className = "font-bold text-xs text-amber-300";
-                    if (bar) bar.className = "h-full bg-amber-400 transition-all duration-150";
-                } else {
-                    if (card) {
-                        card.className = `p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-slate-900 border-slate-800 hover:border-slate-700 ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
-                    }
-                    if (name) name.className = "font-bold text-xs text-slate-300";
-                    if (bar) bar.className = "h-full bg-slate-700 transition-all duration-150";
-                }
-            });
+    // [신호 구간별 판정 조건]
+    // 1) 100 이상 또는 60~75 사이: 노란색
+    // 2) 75~99 사이: 초록색
+    // 3) 60 미만: 기본(기존 그대로)
+    if (levelPct >= 100 || (levelPct >= 60 && levelPct < 75)) {
+        activeCount++;
+        if (card) {
+            card.className = `p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-amber-950/80 border-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.35)] ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
+        }
+        if (name) name.className = "font-bold text-xs text-amber-300";
+        if (bar) bar.className = "h-full bg-amber-400 transition-all duration-150";
+    } else if (levelPct >= 75 && levelPct < 100) {
+        activeCount++;
+        if (card) {
+            card.className = `p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-emerald-950/80 border-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.35)] ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
+        }
+        if (name) name.className = "font-bold text-xs text-emerald-300";
+        if (bar) bar.className = "h-full bg-emerald-400 transition-all duration-150";
+    } else {
+        if (card) {
+            card.className = `p-2 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between min-h-[68px] relative overflow-hidden bg-slate-900 border-slate-800 hover:border-slate-700 ${selectedChannel && selectedChannel.id === item.id ? 'ring-2 ring-cyan-400' : ''}`;
+        }
+        if (name) name.className = "font-bold text-xs text-slate-300";
+        if (bar) bar.className = "h-full bg-slate-700 transition-all duration-150";
+    }
+});
 
             // Update Peak Display Hz
             let maxBin = 0, maxVal = 0;
